@@ -18,13 +18,5 @@ RUN pip install --no-cache-dir -r ./requirements.txt
 # Set the user to non-root
 USER celeryuser
 
-# Make port 5000 available to the world outside this container
-EXPOSE 5000
-
-# Define environment variable
-ENV FLASK_APP=run.py
-ENV FLASK_RUN_HOST=0.0.0.0
-# ENV FLASK_RUN_HOST=flask-app
-
 # Run app.py when the container launches
-CMD ["flask", "run"]
+CMD ["python", "run.py"]
