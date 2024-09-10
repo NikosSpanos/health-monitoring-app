@@ -1,0 +1,119 @@
+Designing the health monitoring system (Data pipeline graph attached)
+
+
+
+mvn clean package
+
+# Start Producer
+java -cp ./target/health-simulator-avro-1.0-jar-with-dependencies.jar com.simulator.DeviceSimulator 10
+
+
+curl -X DELETE http://localhost:8083/connectors/jdbc-sink-connector
+curl http://localhost:8083/connectors/jdbc-sink-connector/status
+curl -X POST -H "Content-Type: application/json" --data @kafka-connect/sink-config.json http://localhost:8083/connectors
+docker exec kafka-broker-1 kafka-console-consumer.sh --bootstrap-server kafka-broker-1:9092 --topic health-data-records --from-beginning
+
+docker-compose up -d --build
+
+docker build -t doctor-web-framework:v1 ./doctor_web_framework
+docker build -t celery_worker:v1 -f Dockerfile_celery ./doctor_web_framework
+
+PostgreSQL creation queries
+---------------------------
+CREATE TABLE public.health_data_records (
+	id BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+	deviceId VARCHAR(50),
+	heartRate INTEGER,
+	temperature DECIMAL,
+    spo2 INTEGER,
+    timestamp VARCHAR(20)
+);
+
+CREATE TABLE public.doctors (
+	id SERIAL PRIMARY KEY,
+	name VARCHAR(100),
+	email VARCHAR(100) UNIQUE,
+	password_hash VARCHAR(100)
+);
+INSERT INTO public.doctors (name, email, password_hash)
+	VALUES ('Nikos Spanos', 'nikos.spanos@outlook.com', 'nikospassword'),
+		   ('Panagiotis Sioulas', 'panos.sioulas@gmail.com', 'panospassword'),
+		   ('John Smith', 'john.smith@gmail.com', 'johnpassword');
+SELECT *
+	FROM public.doctors;
+
+CREATE TABLE public.device_mapping (
+	device_id VARCHAR(100) PRIMARY KEY,
+	doctor_id VARCHAR(100) REFERENCES doctors(email)
+);
+INSERT INTO public.device_mapping (device_id, doctor_id)
+	VALUES ('device_1', 'nikos.spanos@outlook.com'),
+		   ('device_2', 'nikos.spanos@outlook.com'),
+		   ('device_3', 'nikos.spanos@outlook.com'),
+		   ('device_4', 'panos.sioulas@gmail.com'),
+		   ('device_5', 'panos.sioulas@gmail.com'),
+		   ('device_6', 'panos.sioulas@gmail.com'),
+		   ('device_7', 'john.smith@gmail.com'),
+		   ('device_8', 'john.smith@gmail.com'),
+		   ('device_9', 'john.smith@gmail.com'),
+		   ('device_10', 'john.smith@gmail.com');
+
+CREATE TABLE public.medical_records (
+	medical_history_record_id INTEGER PRIMARY KEY,
+	illnesses VARCHAR(100),
+	surgeries VARCHAR(100),
+	chronic_conditions VARCHAR(200),
+	family_history VARCHAR(200),
+	smoking VARCHAR(5),
+	alcohol_usage VARCHAR(20),
+	allerges VARCHAR(200),
+	medication VARCHAR(200)
+);
+INSERT INTO public.medical_records (medical_history_record_id, illnesses, surgeries, chronic_conditions, family_history, smoking, alcohol_usage, allerges, medication)
+	VALUES (1001, 'Hypertension', NULL, 'Diabetes', 'Heart disease', 'No', 'Occasional', NULL, 'Metformin'),
+		   (1002, NULL, 'Appendectomy', NULL, 'Cancer', 'No', 'No', 'Peanuts', NULL),
+		   (1003, 'Asthma', NULL, NULL, 'Asthma', 'Yes', 'No', NULL, 'Inhaler'),
+		   (1004, 'Migraine', 'Gallbladder removal', 'Hypertension', NULL, 'No', 'No', 'Shellfish', 'Propranolol'),
+		   (1005, NULL, NULL, 'Arthritis', 'Diabetes', 'No', 'Occasional', NULL, 'Ibuprofen'),
+		   (1006, 'Allergies', NULL, NULL, NULL, 'No', 'No', 'Dust', 'Antihistamines'),
+		   (1007, 'Hypertension', 'Hernia repair', 'Obesity', NULL, 'Yes', 'Frequent', NULL, 'Lisinopril'),
+		   (1008, NULL, 'Knee surgery', 'Asthma', 'Asthma', 'No', 'No', 'Pollen', 'Albuterol'),
+		   (1009, 'Anxiety', NULL, NULL, 'Depression', 'Yes', 'Occasional', NULL, 'Sertraline'),
+		   (1010, NULL, NULL, 'Hypertension', NULL, 'No', 'No', NULL, 'Amlodipine');
+
+CREATE TABLE public.owners (
+	owner_username VARCHAR(100) PRIMARY KEY,
+	owner_name VARCHAR(100),
+	age INTEGER,
+	marital_status VARCHAR(50),
+	gender VARCHAR(50),
+	medical_history_record_id INTEGER UNIQUE REFERENCES medical_records(medical_history_record_id)
+);
+INSERT INTO public.owners (owner_username, owner_name, age, marital_status, gender, medical_history_record_id)
+	VALUES ('usernameA', 'Alicia Keys', 61, 'Single', 'Female', 1001),
+		   ('usernameB', 'Liam Whitaker', 32, 'Single', 'Male', 1002),
+		   ('usernameC', 'Ethan Caldwell', 45, 'Single', 'Male', 1003),
+		   ('usernameD', 'Isabella Foster', 37, 'Divorced', 'Female', 1004),
+		   ('usernameE', 'Noah Sinclair', 29, 'Married', 'Male', 1005),
+		   ('usernameF', 'Olivia Mason', 33, 'Single', 'Female', 1006),
+		   ('usernameG', 'Lucas Bennett', 40, 'Married', 'Male', 1007),
+		   ('usernameH', 'Amelia Grant', 26, 'Single', 'Female', 1008),
+		   ('usernameI', 'Mason Huntley', 35, 'Divorced', 'Male', 1009),
+		   ('usernameJ', 'Charlotte Spencer', 31, 'Married', 'Female', 1010);
+
+CREATE TABLE public.devices (
+	device_id VARCHAR(100) PRIMARY KEY,
+	device_type VARCHAR(100),
+	device_owner VARCHAR(100) UNIQUE REFERENCES owners(owner_username)
+);
+INSERT INTO public.devices (device_id, device_type, device_owner)
+	VALUES ('device_1', 'smart-band 3 xiaomi', 'usernameA'),
+		   ('device_2', 'smart-band 4 xiaomi', 'usernameB'),
+		   ('device_3', 'smart-band 5 xiaomi', 'usernameC'),
+		   ('device_4', 'smart-band 6 xiaomi', 'usernameD'),
+		   ('device_5', 'smart-band 7 xiaomi', 'usernameE'),
+		   ('device_6', 'smart-band 8 xiaomi', 'usernameF'),
+		   ('device_7', 'Apple Watch Series 2', 'usernameG'),
+		   ('device_8', 'Apple Watch Series 3', 'usernameH'),
+		   ('device_9', 'Samsung Galaxy Fit 3', 'usernameI'),
+		   ('device_10', 'Garmin', 'usernameJ');

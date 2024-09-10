@@ -1,0 +1,256 @@
+version: '3'
+#https://www.baeldung.com/kafka-docker-connection
+services:
+  zookeeper:
+    image: bitnami/zookeeper:3.7.0
+    container_name: zookeeper
+    ports:
+     - "2181:2181"
+    environment:
+      ALLOW_ANONYMOUS_LOGIN: "yes"
+    healthcheck:
+      test: nc -z localhost 2181 || exit 1
+      interval: 10s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+
+  kafka-broker-1:
+    image: bitnami/kafka:2.7.0
+    hostname: kafka-broker-1
+    container_name: kafka-broker-1
+    ports:
+      - "29092:29092"
+    environment:
+      KAFKA_CFG_BROKER_ID: 1
+      KAFKA_CFG_ZOOKEEPER_CONNECT: zookeeper:2181
+      KAFKA_CFG_LISTENERS: HOST_LISTENER://0.0.0.0:29092, INT_LISTENER://0.0.0.0:9092
+      KAFKA_CFG_ADVERTISED_LISTENERS: HOST_LISTENER://localhost:29092, INT_LISTENER://kafka-broker-1:9092
+      KAFKA_CFG_LISTENER_SECURITY_PROTOCOL_MAP: HOST_LISTENER:PLAINTEXT, INT_LISTENER:PLAINTEXT
+      KAFKA_CFG_INTER_BROKER_LISTENER_NAME: INT_LISTENER
+      KAFKA_ZOOKEEPER_PROTOCOL: PLAINTEXT
+      ALLOW_PLAINTEXT_LISTENER: "yes"
+      KAFKA_CFG_OFFSETS_TOPIC_REPLICATION_FACTOR: 3
+      KAFKA_CFG_NUM_PARTITIONS: 4
+      CONFLUENT_SCHEMA_REGISTRY_URL: 'http://schema-registry:8081'
+    depends_on:
+      zookeeper:
+        condition: service_healthy
+    restart: unless-stopped
+    healthcheck:
+      test: kafka-topics.sh --list --bootstrap-server localhost:9092 || exit 1
+      interval: 20s
+      timeout: 10s
+      retries: 3
+  
+  kafka-broker-2:
+    image: bitnami/kafka:2.7.0
+    hostname: kafka-broker-2
+    container_name: kafka-broker-2
+    ports:
+      - "29093:29093"
+    environment:
+      KAFKA_CFG_BROKER_ID: 2
+      KAFKA_CFG_ZOOKEEPER_CONNECT: zookeeper:2181
+      KAFKA_CFG_LISTENERS: HOST_LISTENER://0.0.0.0:29093, INT_LISTENER://0.0.0.0:9093
+      KAFKA_CFG_ADVERTISED_LISTENERS: HOST_LISTENER://localhost:29093, INT_LISTENER://kafka-broker-2:9093
+      KAFKA_CFG_LISTENER_SECURITY_PROTOCOL_MAP: HOST_LISTENER:PLAINTEXT, INT_LISTENER:PLAINTEXT
+      KAFKA_CFG_INTER_BROKER_LISTENER_NAME: INT_LISTENER
+      KAFKA_ZOOKEEPER_PROTOCOL: PLAINTEXT
+      ALLOW_PLAINTEXT_LISTENER: "yes"
+      KAFKA_CFG_OFFSETS_TOPIC_REPLICATION_FACTOR: 3
+      KAFKA_CFG_NUM_PARTITIONS: 4
+      CONFLUENT_SCHEMA_REGISTRY_URL: 'http://schema-registry:8081'
+
+    depends_on:
+      zookeeper:
+        condition: service_healthy
+    restart: unless-stopped
+    healthcheck:
+      test: kafka-topics.sh --list --bootstrap-server localhost:9093 || exit 1
+      interval: 20s
+      timeout: 10s
+      retries: 3
+
+  kafka-broker-3:
+    image: bitnami/kafka:2.7.0
+    hostname: kafka-broker-3
+    container_name: kafka-broker-3
+    ports:
+      - "29094:29094"
+    environment:
+      KAFKA_CFG_BROKER_ID: 3
+      KAFKA_CFG_ZOOKEEPER_CONNECT: zookeeper:2181
+      KAFKA_CFG_LISTENERS: HOST_LISTENER://0.0.0.0:29094, INT_LISTENER://0.0.0.0:9094
+      KAFKA_CFG_ADVERTISED_LISTENERS: HOST_LISTENER://localhost:29094, INT_LISTENER://kafka-broker-3:9094
+      KAFKA_CFG_LISTENER_SECURITY_PROTOCOL_MAP: HOST_LISTENER:PLAINTEXT, INT_LISTENER:PLAINTEXT
+      KAFKA_CFG_INTER_BROKER_LISTENER_NAME: INT_LISTENER
+      KAFKA_ZOOKEEPER_PROTOCOL: PLAINTEXT
+      ALLOW_PLAINTEXT_LISTENER: "yes"
+      KAFKA_CFG_OFFSETS_TOPIC_REPLICATION_FACTOR: 3
+      KAFKA_CFG_NUM_PARTITIONS: 4
+      CONFLUENT_SCHEMA_REGISTRY_URL: 'http://schema-registry:8081'
+    depends_on:
+      zookeeper:
+        condition: service_healthy
+    restart: unless-stopped
+    healthcheck:
+      test: kafka-topics.sh --list --bootstrap-server localhost:9094 || exit 1
+      interval: 20s
+      timeout: 10s
+      retries: 3
+  
+  schema-registry:
+    image: confluentinc/cp-schema-registry:7.4.6
+    hostname: schema-registry
+    container_name: schema-registry
+    depends_on:
+      zookeeper:
+        condition: service_healthy
+      kafka-broker-1:
+        condition: service_healthy
+      kafka-broker-2:
+        condition: service_healthy
+      kafka-broker-3:
+        condition: service_healthy
+    ports:
+      - "8081:8081"
+    environment:
+      SCHEMA_REGISTRY_HOST_NAME: schema-registry
+      SCHEMA_REGISTRY_KAFKASTORE_BOOTSTRAP_SERVERS: PLAINTEXT://kafka-broker-1:9092,PLAINTEXT://kafka-broker-2:9093,PLAINTEXT://kafka-broker-3:9094
+      SCHEMA_REGISTRY_LISTENERS: http://0.0.0.0:8081
+      SCHEMA_REGISTRY_DEBUG: 'true'
+    healthcheck:
+      test: curl -f http://localhost:8081/subjects || exit 1
+      interval: 20s
+      timeout: 10s
+      retries: 3
+
+  kafdrop:
+    image: obsidiandynamics/kafdrop:4.0.2
+    ports:
+      - "9000:9000"
+    environment:
+      KAFKA_BROKERCONNECT: "kafka-broker-1:9092,kafka-broker-2:9093,kafka-broker-3:9094"
+      JVM_OPTS: "-Xms32M -Xmx64M"
+      CMD_ARGS: "--message.format=AVRO --message.keyFormat=DEFAULT --schemaregistry.connect=http://schema-registry:8081"
+    depends_on:
+      zookeeper:
+        condition: service_healthy
+      kafka-broker-1:
+        condition: service_healthy
+      kafka-broker-2:
+        condition: service_healthy
+      kafka-broker-3:
+        condition: service_healthy
+      schema-registry:
+        condition: service_healthy
+  
+  postgres:
+    image: postgres:13.16
+    container_name: postgres
+    ports:
+      - "5432:5432"
+    environment:
+      POSTGRES_PASSWORD: mypassword
+      POSTGRES_USER: admin_user
+      POSTGRES_DB: health_records
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    restart: always
+
+  pgadmin:
+    image: dpage/pgadmin4:8.11
+    container_name: pgadmin
+    environment:
+      PGADMIN_DEFAULT_EMAIL: nikos.spanos@example.com
+      PGADMIN_DEFAULT_PASSWORD: admin
+    ports:
+      - "5050:80"
+    depends_on:
+      - postgres
+    volumes:
+      - ./postgres/servers.json:/pgadmin4/servers.json
+      - ./postgres/pgpassfile:/pgpassfile
+
+  kafka-connect:
+    image: confluentinc/cp-kafka-connect:7.4.6
+    container_name: kafka-connect
+    ports:
+      - "8083:8083"
+    depends_on:
+      - kafka-broker-1
+      - kafka-broker-2
+      - kafka-broker-3
+      - postgres
+    environment:
+      CONNECT_BOOTSTRAP_SERVERS: "kafka-broker-1:9092,kafka-broker-2:9093,kafka-broker-3:9094"
+      CONNECT_REST_PORT: 8083
+      CONNECT_GROUP_ID: kafka-connect-group
+      CONNECT_CONFIG_STORAGE_TOPIC: _connect-configs
+      CONNECT_OFFSET_STORAGE_TOPIC: _connect-offsets
+      CONNECT_STATUS_STORAGE_TOPIC: _connect-status
+      CONNECT_KEY_CONVERTER: org.apache.kafka.connect.storage.StringConverter
+      CONNECT_VALUE_CONVERTER: org.apache.kafka.connect.json.JsonConverter
+      CONNECT_INTERNAL_KEY_CONVERTER: org.apache.kafka.connect.json.JsonConverter
+      CONNECT_INTERNAL_VALUE_CONVERTER: org.apache.kafka.connect.json.JsonConverter
+      CONNECT_REST_ADVERTISED_HOST_NAME: kafka-connect
+      CONNECT_LOG4J_ROOT_LOGLEVEL: INFO
+      CONNECT_PLUGIN_PATH: /usr/share/java,/usr/share/confluent-hub-components
+    command:
+      - bash
+      - -c
+      - |
+        echo "Installing Connector"
+        confluent-hub install --no-prompt confluentinc/kafka-connect-jdbc:10.7.0
+        #
+        echo "Launching Kafka Connect worker"
+        /etc/confluent/docker/run &
+        #
+        sleep infinity
+    volumes:
+      - ./kafka-connect:/etc/kafka-connect
+  
+  redis:
+    image: redis:7.4.0
+    container_name: redis
+    ports:
+      - "6380:6379"
+    
+  flask-app:
+    # image: doctor-web-framework:v1
+    build:
+      context: ./doctor_web_framework
+      dockerfile: Dockerfile
+    hostname: flask-app
+    container_name: flask-app
+    ports:
+      - "5000:5000"
+    environment:
+      - FLASK_ENV=development
+    depends_on:
+      - postgres
+      - redis
+  
+  celery-worker:
+    # image: doctor-web-framework:v1
+    build:
+      context: ./doctor_web_framework
+      dockerfile: Dockerfile
+    container_name: celery_worker
+    command: celery -A celery_worker.celery worker --loglevel=info
+    environment:
+      - CELERY_BROKER_URL=redis://redis:6379/0
+      - CELERY_RESULT_BACKEND=redis://redis:6379/0
+      - DATABASE_URL=postgresql://admin_user:mypassword@postgres:5432/health_records
+    depends_on:
+      - postgres
+      - redis
+
+networks:
+  default:
+    driver: bridge
+    name: kafka_cluster
+
+volumes:
+  pgdata:

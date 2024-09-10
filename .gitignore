@@ -1,0 +1,6 @@
+/target
+/python_workspace
+/kafka-connect/jars
+/kafka-connect/secrets
+.vscode
+.idea

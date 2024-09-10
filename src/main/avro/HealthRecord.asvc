@@ -1,0 +1,12 @@
+{
+  "type": "record",
+  "name": "HealthRecord",
+  "namespace": "com.simulator.avro",
+  "fields": [
+    {"name": "device_id", "type": "string"},
+    {"name": "heart_rate", "type": "int"},
+    {"name": "temperature", "type": "double"},
+    {"name": "spo2", "type": "int"},
+    {"name": "timestamp", "type": "string"}
+  ]
+}

@@ -1,0 +1,11 @@
+Flask==3.0.3
+Flask-SQLAlchemy==3.1.1
+Flask-Login==0.6.3
+Flask-SocketIO==5.3.6
+Flask-Caching==2.3.0
+celery==5.3.5
+psycopg2-binary==2.9.9
+redis==5.0.8
+plotly==5.24.0
+pandas==2.0.3
+Flask-Cors==5.0.0

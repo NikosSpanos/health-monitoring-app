@@ -1,0 +1,14 @@
+{
+    "Servers": {
+        "1": {
+            "Name": "Health Monitor Sink",
+            "Group": "Servers",
+            "Host": "postgres",
+            "Port": 5432,
+            "MaintenanceDB": "postgres",
+            "Username": "admin_user",
+            "SSLMode": "prefer",
+            "PassFile": "/pgpassfile"
+        }
+    }
+}

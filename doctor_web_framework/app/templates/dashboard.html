@@ -1,0 +1,100 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Dashboard</title>
+    <script src="https://cdn.plot.ly/plotly-latest.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/socket.io/4.7.5/socket.io.js"></script>
+</head>
+<body>
+    <h1>Dashboard for {{ current_user.name }}</h1>
+    <a href="{{ url_for('main.logout') }}">Logout</a>
+
+    {% if graphs %}
+        {% for device_owner, graph in graphs.items() %}
+            <div>
+                <h2>Patient {{ device_owner }}</h2>
+
+                <!-- Patient's Average Temperature KPI -->
+                <h3 id="avg_temp_{{ device_owner }}">Average Temperature (Last 2 Hours): {{ avg_temps[device_owner] }}°C</h3>
+
+                <!-- Chart -->
+                <div id="graph_{{ device_owner }}"></div>
+
+                <!-- Patient Personal Traits -->
+                <h4>Personal Information</h4>
+                <table>
+                    <tr><td>Name:</td><td>{{ personal_traits[device_owner].name }}</td></tr>
+                    <tr><td>Age:</td><td>{{ personal_traits[device_owner].age }}</td></tr>
+                    <tr><td>Gender:</td><td>{{ personal_traits[device_owner].gender }}</td></tr>
+                </table>
+
+                <!-- Patient Medical History -->
+                <h4>Medical History</h4>
+                <table>
+                    <tr><td>Chronic Conditions:</td><td>{{ medical_histories[device_owner].chronic_conditions }}</td></tr>
+                    <tr><td>Family History:</td><td>{{ medical_histories[device_owner].family_history }}</td></tr>
+                    <tr><td>Smoking:</td><td>{{ medical_histories[device_owner].smoking }}</td></tr>
+                    <tr><td>Alcohol Usage:</td><td>{{ medical_histories[device_owner].alcohol_usage }}</td></tr>
+                    <tr><td>Allergies:</td><td>{{ medical_histories[device_owner].allergies }}</td></tr>
+                    <tr><td>Medication:</td><td>{{ medical_histories[device_owner].medication }}</td></tr>
+                </table>
+
+            </div>
+            <script type="text/javascript">
+            var graphdata = JSON.parse('{{ graph | safe }}');
+            console.log(graphdata);  // Log the graph data for debugging
+            Plotly.newPlot('graph_{{ device_owner }}', graphdata);
+            </script>
+        {% endfor %}
+    {% else %}
+        <p>No graph data available.</p>
+    {% endif %}
+    <script type="text/javascript">
+        // Connect to Socket.IO server
+        // var socket = io.connect('http://' + document.domain + ':' + location.port);
+        // var socket = io.connect('http://flask-app:5000');
+        // const socket = io.connect('http://' + window.location.hostname + ':5000');
+        var socket = io('http://' + document.domain + ':' + location.port);
+        // var socket = io.connect();
+        console.log(socket)
+        // console.log(window.location.hostname)
+        console.log(document.domain)
+
+        // Listen for 'update_patient_data' events from the server
+        socket.on('update_patient_data', function(msg) {
+            console.log("Received KPI update for:", msg.device_owner);
+            // Update the graph
+            var graphUpdate = {
+                x: [msg.graph_data.x],
+                y: [msg.graph_data.y_heart_rate],
+                y2: [msg.graph_data.y_spo2]
+            };
+            Plotly.react('graph_' + msg.device_owner, [
+                {x: graphUpdate.x, y: graphUpdate.y, type: 'scatter', mode: 'lines+markers', name: 'Heart Rate'},
+                {x: graphUpdate.x, y: graphUpdate.y2, type: 'scatter', mode: 'lines+markers', name: 'SpO2'}
+            ]);
+            // Update the average temperature KPI
+            document.getElementById('avg_temp_' + msg.device_owner).innerText = 'Average Temperature (Last 2 Hours): ' + msg.avg_temp + '°C';
+            // Update the personal traits
+            var personalTraits = document.getElementById('personal_traits_' + msg.device_owner);
+            personalTraits.innerHTML = `
+                <tr><td>Name:</td><td>${msg.personal_traits.name}</td></tr>
+                <tr><td>Age:</td><td>${msg.personal_traits.age}</td></tr>
+                <tr><td>Gender:</td><td>${msg.personal_traits.gender}</td></tr>
+            `;
+            // Update the medical history
+            var medicalHistory = document.getElementById('medical_history_' + msg.device_owner);
+            medicalHistory.innerHTML = `
+                <tr><td>Chronic Conditions:</td><td>${msg.medical_history.chronic_conditions}</td></tr>
+                <tr><td>Family History:</td><td>${msg.medical_history.family_history}</td></tr>
+                <tr><td>Smoking:</td><td>${msg.medical_history.smoking}</td></tr>
+                <tr><td>Alcohol Usage:</td><td>${msg.medical.alcohol_usage}</td></tr>
+                <tr><td>Allergies:</td><td>${msg.medical.allergies}</td></tr>
+                <tr><td>Medication:</td><td>${msg.medical.medication}</td></tr>
+            `;
+        })
+    </script>
+</body>
+</html>

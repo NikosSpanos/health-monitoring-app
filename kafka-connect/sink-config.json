@@ -1,0 +1,21 @@
+{
+    "name": "jdbc-sink-connector",
+    "config": {
+        "connector.class": "io.confluent.connect.jdbc.JdbcSinkConnector",
+        "tasks.max": "1",
+        "topics": "health-data-records",
+        "connection.url": "jdbc:postgresql://postgres:5432/health_records",
+        "connection.user": "admin_user",
+        "connection.password": "mypassword",
+        "auto.create": "false",
+        "auto.evolve": "false",
+        "insert.mode": "insert",
+        "pk.mode": "none",
+        "delete.enabled": "false",
+        "fields.whitelist": "device_id,heart_rate,temperature,spo2,timestamp",
+        "table.name.format": "health_data_records",
+        "key.converter": "org.apache.kafka.connect.storage.StringConverter",
+        "value.converter": "io.confluent.connect.avro.AvroConverter",
+        "value.converter.schema.registry.url": "http://schema-registry:8081"
+    }
+}
