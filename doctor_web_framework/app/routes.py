@@ -210,8 +210,8 @@ def dashboard():
 
 @socketio.on('connect')
 def connect():
-    global thread
-    print('Client Connected')
+    # global thread
+    # print('Client Connected')
     global thread
     with thread_lock:
         if thread is None:
@@ -219,3 +219,13 @@ def connect():
                 thread = socketio.start_background_task(background_thread, current_user.email)
             else:
                 print("User is not authenticated. Background thread will not start yet.")
+
+@socketio.on('server_connect')
+def handle_connect():
+    print('Client connected')
+    # Once connected, emit a message to the client
+    socketio.emit('server_response', {'data': 'Connected to server'})
+
+@socketio.on('disconnect')
+def handle_disconnect():
+    print('Client disconnected')

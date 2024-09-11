@@ -30,11 +30,9 @@ def create_app():
     cache = Cache(app=app)
     # Call init_app() method for SQLAlchemy, Flask Login Manager, WebSocket
     cache.init_app(app)
-    # with app.app_context():
-    #     cache.clear()
     db.init_app(app)
     login_manager.init_app(app)
-    socketio.init_app(app, debug=True, cors_allowed_origins='*', async_mode=None)
+    socketio.init_app(app, debug=True, cors_allowed_origins='*', logger=True, engineio_logger=True)
     login_manager.login_view = 'main.login'
     # login_manager.login_view = 'login'
 
