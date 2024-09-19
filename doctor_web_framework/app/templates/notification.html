@@ -1,0 +1,162 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Patient Condition Notifications</title>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/socket.io/4.7.5/socket.io.js"></script>
+    <script type="text/javascript" src="https://code.jquery.com/jquery-2.1.4.min.js"></script>
+    <style>
+        /* Basic styling for the colored circles */
+        .circle {
+            width: 40px;
+            height: 40px;
+            border-radius: 50%;
+            display: inline-block;
+            margin: 10px;
+            text-align: center;
+            line-height: 40px;
+            color: white;
+            font-weight: bold;
+        }
+        .circle.red { background-color: red; }
+        .circle.yellow { background-color: yellow; color: black; }
+        .circle.blue { background-color: blue; }
+        .circle.green { background-color: green; }
+        .patient-container {
+            margin-bottom: 30px;
+        }
+        .circles-wrapper {
+            display: flex;
+            gap: 10px; /* Space between circles */
+            justify-content: center; /* Optional: to center the circles horizontally */
+            align-items: flex-start;
+        }
+        .circle-item {
+            text-align: center; /* Center the text under each circle */
+        }
+    </style>
+</head>
+<body>
+    <h1>Notifications for connected doctor: {{ doctor_name }}</h1>
+    <a href="{{ url_for('main.logout') }}">Logout</a>
+    <div id="patient-status-container">
+        <p id="no-patient-message">{{ message }}</p>
+    </div>
+    <script type="text/javascript", charset="utf-8">
+        document.addEventListener('DOMContentLoaded', function() {
+            var doctorEmail = localStorage.getItem('doctor_email')
+            console.log("Logged user in session: ", doctorEmail)
+            
+            var socket = io('http://localhost:5000', {
+                query: {email: doctorEmail},
+                reconnection: true,
+                reconnectionAttempts: 5, // Try reconnecting 5 times
+                reconnectionDelay: 1000  // Wait 1 second between reconnection attempts
+            });
+            
+            // socket.emit('connect', { email: "{{ current_user.email }}", page: '/notification' });
+            socket.on('connect', function() {
+                console.log('Socket connected. Session ID:', socket.id);
+                socket.emit('user_info', { email: "{{ current_user.email }}", page: '/notification' });
+            });
+            
+            socket.on('disconnect', function() {
+                console.log('Disconnected from server');
+            });
+
+            socket.on('reconnect', () => {
+                document.getElementById('status').innerHTML = 'Reconnected!';
+                socket.emit('rejoin', { email: doctorEmail, page: '/notification'});
+            });
+
+            socket.on('patient_notification', function(data) {
+                var patientStatusContainer = document.getElementById('patient-status-container');
+                
+                var noPatientMessage = document.getElementById('no-patient-message');
+                if (noPatientMessage) {
+                    noPatientMessage.style.display = 'none';
+                }
+
+                var patientSection = document.getElementById(`patient-${data.device_owner}`);
+                if (!patientSection) {
+                    patientSection = document.createElement('div');
+                    patientSection.classList.add('patient-container');
+                    patientSection.id = `patient-${data.device_owner}`;
+                    patientSection.innerHTML = `<h3>Patient: ${data.device_owner}</h3>`;
+
+                    // Create a wrapper div for circles
+                    var circlesWrapper = document.createElement('div');
+                    circlesWrapper.classList.add('circles-wrapper');
+
+                    // Circle and message for temperature
+                    var tempCircle = document.createElement('div');
+                    tempCircle.classList.add('circle-item');
+                    tempCircle.innerHTML = `
+                        <div id="temp-circle-${data.device_owner}" class="circle ${data.temperature_metadata.color}"></div>
+                        <p id="temp-msg-${data.device_owner}">Temperature: ${data.temperature_metadata.value}°C</p>
+                        <p id="temp-msg-text-${data.device_owner}">${data.temperature_metadata.message}</p>
+                    `;
+                    circlesWrapper.appendChild(tempCircle);
+                    
+                    // Circle and message for heart rate
+                    var hrCircleItem = document.createElement('div');
+                    hrCircleItem.classList.add('circle-item');
+                    hrCircleItem.innerHTML = `
+                        <div id="hr-circle-${data.device_owner}" class="circle ${data.heartrate_metadata.color}"></div>
+                        <p id="hr-msg-${data.device_owner}">Heart Rate: ${data.heartrate_metadata.value} bpm</p>
+                        <p id="hr-msg-text-${data.device_owner}">${data.heartrate_metadata.message}</p>
+                    `;
+                    circlesWrapper.appendChild(hrCircleItem);
+                    
+                    // Circle and message for SpO2
+                    var spo2CircleItem = document.createElement('div');
+                    spo2CircleItem.classList.add('circle-item');
+                    spo2CircleItem.innerHTML = `
+                        <div id="spo2-circle-${data.device_owner}" class="circle ${data.spo2_metadata.color}"></div>
+                        <p id="spo2-msg-${data.device_owner}">SpO2: ${data.spo2_metadata.value}%</p>
+                        <p id="spo2-msg-text-${data.device_owner}">${data.spo2_metadata.message}</p>
+                    `;
+                    circlesWrapper.appendChild(spo2CircleItem);
+
+                    // Append the circlesWrapper (horizontal alignment) to the patientSection
+                    patientSection.appendChild(circlesWrapper);
+
+                    patientStatusContainer.appendChild(patientSection);
+                } else {
+                    // If patient section already exists, update the values (optional)
+                    // You can update the DOM for an existing patient section if needed
+
+                    document.getElementById(`temp-circle-${data.device_owner}`).className = `circle ${data.temperature_metadata.color}`;
+                    document.getElementById(`temp-msg-${data.device_owner}`).innerText = `Temperature: ${data.temperature_metadata.value}°C`;
+                    document.getElementById(`temp-msg-text-${data.device_owner}`).innerText = `${data.temperature_metadata.message}`;
+
+                    document.getElementById(`hr-circle-${data.device_owner}`).className = `circle ${data.heartrate_metadata.color}`;
+                    document.getElementById(`hr-msg-${data.device_owner}`).innerText = `Heart Rate: ${data.heartrate_metadata.value} bpm`;
+                    document.getElementById(`hr-msg-text-${data.device_owner}`).innerText = `${data.heartrate_metadata.message}`;
+
+                    document.getElementById(`spo2-circle-${data.device_owner}`).className = `circle ${data.spo2_metadata.color}`;
+                    document.getElementById(`spo2-msg-${data.device_owner}`).innerText = `SpO2: ${data.spo2_metadata.value}%`;
+                    document.getElementById(`spo2-msg-text-${data.device_owner}`).innerText = `${data.spo2_metadata.message}`;
+                }
+                // If all values are green, remove the patient section
+                if (data.temperature_metadata.color === 'green' && data.heartrate_metadata.color === 'green' && data.spo2_metadata.color === 'green') {
+                    var patientSectionToRemove = document.getElementById(`patient-${data.device_owner}`);
+                    if (patientSectionToRemove) {
+                        patientSectionToRemove.remove();
+                    }
+
+                    // Show "No patient" message if no more patient sections exist
+                    if (patientStatusContainer.children.length === 0) {
+                        noPatientMessage.style.display = 'block';
+                    }
+                }
+            });
+
+            window.addEventListener('beforeunload', function() {
+                socket.disconnect();
+            });
+        });
+    </script>
+</body>
+</html>

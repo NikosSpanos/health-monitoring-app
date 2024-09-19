@@ -40,8 +40,8 @@ public class DeviceSimulator {
         Random random = new Random();
         
         // Generate random health records
-        int heartRate = random.nextInt(100) + 40;
-        double temperature = random.nextDouble() + 36.0;
+        int heartRate = random.nextInt(100) + 150;
+        double temperature = random.nextDouble() + 37.0;
         int spo2 =  random.nextInt(30) + 70;
         String received_timestamp = getCurrentTimestamp();
 

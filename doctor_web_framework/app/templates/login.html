@@ -7,7 +7,7 @@
 </head>
 <body>
     <h1>Doctor Login</h1>
-    <form method="POST" action="{{ url_for('main.login') }}">
+    <form id="login-form" method="POST" action="{{ url_for('main.login') }}">
         <div>
             <label for="email">Email:</label>
             <input type="email" id="email" name="email" required>
@@ -17,8 +17,9 @@
             <input type="password" id="password" name="password" required>
         </div>
         <div>
-            <button type="submit">Login</button>
-        </div>
+          <button type="button" id="dashboard-btn">Patient Dashboard</button>
+          <button type="button" id="notification-btn">Real-time notifications</button>
+      </div>
     </form>
     {% with messages = get_flashed_messages() %}
       {% if messages %}
@@ -29,5 +30,43 @@
         </ul>
       {% endif %}
     {% endwith %}
+    <script>
+      document.getElementById("dashboard-btn").addEventListener('click', function() {
+        handleLogin('/dashboard');
+      });
+
+      document.getElementById("notification-btn").addEventListener('click', function() {
+        handleLogin('/notification');
+      });
+
+      function handleLogin(redirectUrl) {
+        var email = document.getElementById('email').value;
+        var password = document.getElementById('password').value;
+        
+        fetch('/login', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json'
+            },
+            body: JSON.stringify({ email: email, password: password })
+        })
+        .then(response => {
+          if (!response.ok) {
+              // If the response is not OK (e.g., 401 or 404), throw an error
+              return response.text().then(text => { throw new Error(text) });
+          }
+          return response.json();
+        })
+        .then(data => {
+          if (data && data.email) {
+              // Store the email in localStorage for future use
+              localStorage.setItem('doctor_email', data.email);
+              window.location.href = redirectUrl;
+          }
+        }).catch(error => {
+          console.error('Login failed:', error);
+        });
+      };
+    </script>
 </body>
 </html>

@@ -231,24 +231,9 @@ services:
       - redis
     restart: always
   
-  celery-worker:
-    # image: doctor-web-framework:v1
-    build:
-      context: ./doctor_web_framework
-      dockerfile: Dockerfile
-    container_name: celery_worker
-    command: celery -A celery_worker.celery worker --loglevel=info
-    environment:
-      - CELERY_BROKER_URL=redis://redis:6379/0
-      - CELERY_RESULT_BACKEND=redis://redis:6379/0
-      - DATABASE_URL=postgresql://admin_user:mypassword@postgres:5432/health_records
-    depends_on:
-      - postgres
-      - redis
-    restart: always
-  
   nginx:
     image: "nginx:1.27.1-alpine"
+    container_name: nginx
     ports:
       - "3002:80"
     volumes:
