@@ -174,14 +174,31 @@
                     var submitButton = document.createElement('button');
                     submitButton.textContent = 'Submit Message';
                     submitButton.onclick = function() {
-                        var message = document.getElementById('message_' + msg.device_owner).value;
+                        var messageElement = document.getElementById('message_' + msg.device_owner);
+                        if (!messageElement) {
+                            console.error('Message box for device_owner ' + msg.device_owner + ' not found.');
+                            return;
+                        }
+                        var message = messageElement.value;
+                        if (message.trim() === "") {
+                            alert('Please enter a message');
+                            return;
+                        }
                         socket.emit('send_patient_message', {
+                            email: doctorEmail,
                             patient_name: msg.personal_traits.name,
                             message: message,
                             device_owner: msg.device_owner,
                             publish_flag: 0
                         });
-                        alert('Message sent for ' + msg.personal_traits.name);
+                        console.log('Message sent:', {
+                            email: doctorEmail,
+                            patient_name: msg.personal_traits.name,
+                            message: message,
+                            device_owner: msg.device_owner,
+                            publish_flag: 0
+                        });
+                        //alert('Message sent for ' + msg.personal_traits.name);
                     };
                     patientDiv.appendChild(submitButton);
 
@@ -232,6 +249,13 @@
                 }
                 // Generate or update the chart for the selected patient
                 createOrUpdateChart(msg.device_owner, msg.graph_data);
+            });
+
+            socket.on('message_saved', function(data) {
+                console.log("Message Saved Event Received:");
+                console.log("Status: " + data.status);
+                console.log("Message: " + data.message);
+                console.log("Patient: " + data.patient_name);
             });
 
             // Handle disconnect event

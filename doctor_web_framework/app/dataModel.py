@@ -1,5 +1,6 @@
 from . import db
 from flask_login import UserMixin
+from datetime import datetime
 
 class Doctor(UserMixin, db.Model):
     __tablename__ = 'doctors'
@@ -48,3 +49,13 @@ class DeviceRecords(db.Model):
     temperature = db.Column(db.Numeric(precision=10, scale=2), nullable=False)
     spo2 = db.Column(db.Integer)
     timestamp = db.Column(db.String(20))
+
+class PatientMessage(db.Model):
+    __tablename__ = 'patient_messages'
+    
+    id = db.Column(db.Integer, primary_key=True)
+    patient_name = db.Column(db.String(100),  db.ForeignKey('owners.owner_name'), nullable=False)
+    device_owner = db.Column(db.String(100), db.ForeignKey('owners.owner_username'), nullable=False, )  # This is the patient ID
+    message = db.Column(db.Text, nullable=False)
+    status_flag = db.Column(db.Integer, nullable=False)
+    timestamp = db.Column(db.DateTime, default=datetime.now())  # Store the timestamp when the message is written

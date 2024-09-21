@@ -1,10 +1,10 @@
 from flask import Blueprint, render_template, redirect, url_for, request, session, jsonify
 from flask_login import login_user, logout_user, login_required, current_user
-from .dataModel import Doctor, Device, DoctorDeviceMapping, DeviceRecords, Owner, MedicalRecords, db
+from .dataModel import Doctor, Device, DoctorDeviceMapping, DeviceRecords, Owner, MedicalRecords, PatientMessage, db
 from flask_socketio import join_room, leave_room
-from . import login_manager, socketio, thread_lock, redis_client, app, user_threads, stop_signals, user_sessions, patients_session
+from . import login_manager, socketio, thread_lock, redis_client, app, user_threads, stop_signals, user_sessions, patients_session, logger
 from flask_caching import Cache
-from typing import List, Tuple, Dict
+from typing import List, Dict
 from datetime import datetime, timedelta
 from sqlalchemy import func, or_
 from config import HealthConditions
@@ -99,7 +99,7 @@ def compute_kpis(doctor_email:str, patients:list, redis_conn:Cache, kpi_freshnes
             'Timestamp': [convert_string_to_datetime(record.timestamp) for record in device_data],
             'Heart Rate': [record.heart_rate for record in device_data],
             'SpO2': [record.spo2 for record in device_data],
-            'Temperature': [record.temperature if record.temperature else -1.0 for record in device_data]
+            'Temperature': [record.temperature for record in device_data]
         }
         df = pd.DataFrame(data)
         df['Timestamp'] = pd.to_datetime(df['Timestamp'])
@@ -355,7 +355,6 @@ def handle_patients(data:Dict[str, str]):
                         del patients_session[sid]
                         user_threads[email] = socketio.start_background_task(background_thread, email, patients)
                 else:
-                    # if (email not in user_threads) or (not user_threads[email].is_alive()):
                     if (email not in user_threads):
                         patients_session[sid] = patients
                         user_threads[email] = socketio.start_background_task(background_thread, email, patients)
@@ -380,18 +379,6 @@ def handle_connect(data:Dict[str, str]):
                 stop_signals[email] = threading.Event()
             else:
                 stop_signals[email].clear()
-
-            # if page == '/dashboard':
-            #     if (email not in user_threads) or (not user_threads[email]['monitor_patient'].is_alive()):
-            #         user_threads[email]['monitor_patient'] = socketio.start_background_task(background_thread, email)
-
-            # elif page == '/notification':
-            #     if (email not in user_threads) or (not user_threads[email]['critical_conditions'].is_alive()):
-            #         user_threads[email]['critical_conditions'] = socketio.start_background_task(monitor_critical_condition, email)
-            
-            # if page == '/dashboard':
-            #     if (email not in user_threads) or (not user_threads[email].is_alive()):
-            #         user_threads[email] = socketio.start_background_task(background_thread, email)
 
             if page == '/notification':
                 if (email not in user_threads) or (not user_threads[email].is_alive()):
@@ -433,23 +420,19 @@ def handle_rejoin(data:dict):
         # Optionally restart or verify background thread here
         with thread_lock:
             if page == '/dashboard':
-                if (email not in user_threads) or (not user_threads[email]['monitor_patient'].is_alive()):
+                if (email not in user_threads) or (not user_threads[email].is_alive()):
                     user_threads[email]['monitor_patient'] = socketio.start_background_task(background_thread, email)
 
             elif page == '/notification':
-                if (email not in user_threads) or (not user_threads[email]['critical_conditions'].is_alive()):
+                if (email not in user_threads) or (not user_threads[email].is_alive()):
                     user_threads[email]['critical_conditions'] = socketio.start_background_task(monitor_critical_condition, email)
 
 @socketio.on('server_response')
 def handle_connect():
-    print('Client connected')
-    print(current_user.email)
     email = request.args.get('email')
-    print(email)
     # Once connected, emit a message to the client
     # socketio.emit('server_response', {'data': 'Connected to server'}, room=str(current_user.email))
     if email:
-        print(f'Client connected with email: {email}')
         # Store the user's session ID mapped to their email
         user_sessions[email] = request.sid
         # Add the user to their own room (identified by their email)
@@ -458,4 +441,47 @@ def handle_connect():
         socketio.emit('server_response', {'data': 'Connected to server'}, room=email)
     else:
         print('Email not found in connection request.')
+    
+@socketio.on("send_patient_message")
+def handle_patient_message(data:dict):
+    # with app.app_context():
+    try:
+        # print(f"Received send_patient_message event with data: {data}")
+        logger.info("Received send_patient_message event with data: ", data)
+
+        # email = data.get('email')
+        # sid = request.sid
+        patient_name = data.get('patient_name')
+        message = data.get('message')
+        device_owner = data.get('device_owner')
+        flag = data.get('publish_flag')
+
+        if not all([patient_name, message, device_owner]):
+            logger.warning("Incomplete message data received.")
+            socketio.emit('message_saved', {
+                'status': 'error',
+                'message': 'Missing required data',
+                'table_name': 'patient_messages'
+            })
+            return
+        
+        # join_room(email, sid=sid)
+        new_message = PatientMessage(
+            patient_name=patient_name,
+            device_owner=device_owner,
+            message=message,
+            status_flag = flag,
+            timestamp=datetime.now()  # Automatically record the timestamp of when the message is received
+        )
+        logger.info("Adding message to the database...")
+        db.session.add(new_message)
+        db.session.commit()  # Write the record to the database
+        logger.info(f"Message from {patient_name} (device owner: {device_owner}) saved to the database.")
+
+        # Optionally send confirmation to the client
+        socketio.emit('message_saved', {'status': 'success', 'message': 'Message saved successfully', 'patient_name': patient_name})
+    except Exception as e:
+        db.session.rollback()  # Rollback the transaction in case of error
+        logger.error(f"Error saving message: {str(e)}", exc_info=True)
+        socketio.emit('message_saved', {'status': 'error', 'message': 'Failed to save message', 'patient_name': patient_name})
 

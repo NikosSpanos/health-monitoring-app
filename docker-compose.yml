@@ -229,6 +229,8 @@ services:
     depends_on:
       - postgres
       - redis
+    volumes:
+      - ./doctor_web_framework/logs:/doctor-web-framework/logs
     restart: always
   
   nginx:

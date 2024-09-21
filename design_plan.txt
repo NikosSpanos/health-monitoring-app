@@ -117,3 +117,12 @@ INSERT INTO public.devices (device_id, device_type, device_owner)
 		   ('device_8', 'Apple Watch Series 3', 'usernameH'),
 		   ('device_9', 'Samsung Galaxy Fit 3', 'usernameI'),
 		   ('device_10', 'Garmin', 'usernameJ');
+
+CREATE TABLE public.patient_messages (
+	id BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+	patient_name VARCHAR(100),
+	device_owner VARCHAR(100),
+	message TEXT,
+	status_flag INTEGER,
+	timestamp TIMESTAMP
+);
