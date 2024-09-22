@@ -233,6 +233,18 @@ services:
       - ./doctor_web_framework/logs:/doctor-web-framework/logs
     restart: always
   
+  patient-app:
+    build: 
+      context: ./patient_framework
+      dockerfile: Dockerfile
+    hostname: patient-app
+    container_name: patient-app
+    depends_on:
+      - postgres
+    ports:
+      - "8000:8000"
+    restart: always
+  
   nginx:
     image: "nginx:1.27.1-alpine"
     container_name: nginx

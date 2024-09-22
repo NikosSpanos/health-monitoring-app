@@ -1,0 +1,40 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Message Log</title>
+    <style>
+        .message-container {
+            border: 1px solid #ddd;
+            padding: 10px;
+            margin-top: 20px;
+        }
+        .timestamp {
+            font-size: 0.8em;
+            color: #666;
+            margin-top: 5px;
+        }
+    </style>
+</head>
+<body>
+    <h1>Welcome {{ patient_name }}</h1>
+    <div id="message-container" class="message-container">
+        <p>Latest message: {{ message }}</p>
+        {% if timestamp %}
+            <p class="timestamp">Sent at: {{ timestamp.strftime('%Y-%m-%d %H:%M:%S') }}</p>
+        {% endif %}
+    </div>
+    <script>
+        const username = "{{ username }}";
+        const ws = new WebSocket(`ws://localhost:8000/ws/${username}`);
+
+        ws.onmessage = function(event) {
+            const data = JSON.parse(event.data);
+            document.querySelector('h1').textContent = `Welcome ${data.patient_name}`;
+            document.getElementById('message-container').innerHTML = `
+                <p>Latest message: ${data.message}</p>
+                <p class="timestamp">Sent at: ${new Date(data.timestamp).toLocaleString()}</p>
+            `;
+        };
+    </script>
+</body>
+</html>

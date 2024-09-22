@@ -4,3 +4,4 @@
 /kafka-connect/secrets
 .vscode
 .idea
+/doctor_web_framework/logs

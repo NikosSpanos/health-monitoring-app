@@ -8,9 +8,7 @@ from typing import Dict, List, Tuple
 from config import Config
 import logging
 from logging.handlers import RotatingFileHandler
-import sys
 
-# user_threads:Dict[str, Dict[str, Thread]] = {}
 user_threads:Dict[str, Thread] = {}
 stop_signals:Dict[str, Event] = {}
 patients_session:Dict[str, List] = {}
@@ -43,8 +41,6 @@ def create_app()->Tuple[Flask,Cache,logging.Logger]:
     logger.addHandler(file_handler)
     logger.setLevel(log_level)
 
-    # logging.basicConfig(stream=sys.stdout, level=logging.INFO)
-    # logger = logging.getLogger('sqlalchemy.engine').setLevel(logging.INFO)
     # Initialize Redis client
     #redis_client = redis.Redis(host=Config.CACHE_REDIS_HOST, port=Config.CACHE_REDIS_PORT, db=Config.CACHE_REDIS_DB)
 
