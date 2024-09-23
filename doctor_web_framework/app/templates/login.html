@@ -32,10 +32,12 @@
     {% endwith %}
     <script>
       document.getElementById("dashboard-btn").addEventListener('click', function() {
+        event.preventDefault();  // Prevent the default form submission
         handleLogin('/dashboard');
       });
 
       document.getElementById("notification-btn").addEventListener('click', function() {
+        event.preventDefault();  // Prevent the default form submission
         handleLogin('/notification');
       });
 
@@ -61,6 +63,7 @@
           if (data && data.email) {
               // Store the email in localStorage for future use
               localStorage.setItem('doctor_email', data.email);
+              // Redirect to the desired page
               window.location.href = redirectUrl;
           }
         }).catch(error => {

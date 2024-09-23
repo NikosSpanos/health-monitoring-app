@@ -1,3 +1,6 @@
+from gevent import monkey
+monkey.patch_all()
+
 from flask import Flask
 from flask_sqlalchemy import SQLAlchemy
 from flask_login import LoginManager
@@ -20,13 +23,19 @@ user_sessions = {}
 
 def create_app()->Tuple[Flask,Cache,logging.Logger]:
     app = Flask(__name__)
-    app.config.from_object(Config) #Initialize default configuration for the Flask-APP
+    app.config.from_object(Config)
     cache = Cache(app=app)
     # Call init_app() method for SQLAlchemy, Flask Login Manager, WebSocket
     cache.init_app(app)
     db.init_app(app)
     login_manager.init_app(app)
-    socketio.init_app(app, cors_allowed_origins='*', logger=True, engineio_logger=True)
+    socketio.init_app(
+        app=app,
+        message_queue='redis://redis:6379/1',
+        debug=True,
+        logger=True,
+        engineio_logger=True
+    )
     login_manager.login_view = 'main.login'
 
     log_file = './logs/app.log'

@@ -218,23 +218,23 @@ services:
       - "6380:6379"
     
   flask-app:
-    # image: doctor-web-framework:v1
     build:
       context: ./doctor_web_framework
       dockerfile: Dockerfile
-    hostname: flask-app
-    container_name: flask-app
-    ports:
-      - "5000:5000"
+    deploy:
+      replicas: 4
+    hostname: flask-app-{{.Task.Slot}}
     depends_on:
       - postgres
       - redis
     volumes:
       - ./doctor_web_framework/logs:/doctor-web-framework/logs
+    environment:
+      - GUNICORN_WORKERS=4
     restart: always
   
   patient-app:
-    build: 
+    build:
       context: ./patient_framework
       dockerfile: Dockerfile
     hostname: patient-app
@@ -250,6 +250,7 @@ services:
     container_name: nginx
     ports:
       - "3002:80"
+      # - "80:80"
     volumes:
       - ./nginx.conf:/etc/nginx/nginx.conf
       - ./proxy_params:/etc/nginx/proxy_params

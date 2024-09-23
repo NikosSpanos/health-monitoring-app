@@ -13,13 +13,29 @@ import json
 import math
 import threading
 
-main = Blueprint('main', __name__)
+main = Blueprint('main', __name__, url_prefix='/')
 
 @login_manager.user_loader
 def load_user(user_id):
     print("USER_ID", user_id)
     # return Doctor.query.filter_by(id = user_id).get(Doctor.email)
     return Doctor.query.get(user_id)
+
+def safe_delete(dictionary, key):
+    """Safely delete a key from a dictionary if it exists."""
+    with thread_lock:
+        if key in dictionary:
+            del dictionary[key]
+
+def stop_user_thread(email):
+    """Safely stop and remove a user's background thread."""
+    with thread_lock:
+        if email in stop_signals:
+            stop_signals[email].set()
+        if email in user_threads:
+            user_threads[email].join(timeout=5)  # Wait for thread to finish
+            safe_delete(user_threads, email)
+        safe_delete(stop_signals, email)
 
 @main.route('/')
 def index():
@@ -50,6 +66,16 @@ def login():
 @main.route('/logout')
 @login_required
 def logout():
+    email = request.form.get('email')
+
+    # Gracefully stop background threads and clean up resources
+    if email in stop_signals:
+        stop_signals[email].set()
+    
+    with thread_lock:
+        user_threads.pop(email, None)
+        stop_signals.pop(email, None)
+        user_sessions.pop(email, None)
     logout_user()
     return redirect(url_for('main.login'))
 
@@ -178,23 +204,32 @@ def compute_kpis(doctor_email:str, patients:list, redis_conn:Cache, kpi_freshnes
     return json_blob
 
 def background_thread(doctor_email:str, patients:list):
-    while not stop_signals[doctor_email].is_set():
-        with app.app_context():
-            computed_records = compute_kpis(doctor_email, patients, redis_client, 2, "refresh")
-            for id, name in computed_records['device_owners'].items():
-                socketio.emit(
-                    'update_patient_data',
-                    {
-                        'device_owner': id,
-                        'avg_temp': computed_records['avg_temps'][id],
-                        'graph_data': computed_records['graphs'][id],
-                        'personal_traits': computed_records['personal_traits'][id],
-                        'medical_history': computed_records['medical_histories'][id]
-                    },
-                    room=doctor_email
-                )
-            socketio.sleep(5)
-    print(f"Background thread for {doctor_email} has been stopped.")
+    global stop_signals
+
+    if not stop_signals[doctor_email]:
+        print(f"No stop signal for {doctor_email}, exiting thread.")
+        return  # Exit if no stop signal exists
+    try:
+        while not stop_signals[doctor_email].is_set():
+            with app.app_context():
+                computed_records = compute_kpis(doctor_email, patients, redis_client, 2, "refresh")
+                for id, name in computed_records['device_owners'].items():
+                    socketio.emit(
+                        'update_patient_data',
+                        {
+                            'device_owner': id,
+                            'avg_temp': computed_records['avg_temps'][id],
+                            'graph_data': computed_records['graphs'][id],
+                            'personal_traits': computed_records['personal_traits'][id],
+                            'medical_history': computed_records['medical_histories'][id]
+                        },
+                        room=doctor_email
+                    )
+                socketio.sleep(5)
+    except Exception as e:
+        print(f"Error in background thread for {doctor_email}: {str(e)}")
+    finally:
+        print(f"Background thread for {doctor_email} stopped.")
 
 def monitor_critical_condition(doctor_email:str):
     temp_normal, temp_hypothermi, temp_mild, temp_critical = HealthConditions.Temperature()
@@ -312,12 +347,29 @@ def fetch_patients(email:str) -> List[str]:
         .all()
     )
     owner_names:List[str] = [name for (name,) in owner_names]
+    print("Fetched Owner Names:", owner_names)
     return owner_names
+
+@main.route('/patients', methods=['POST'])
+@login_required
+def get_patients():
+    if request.method == 'POST':
+        # Assuming the doctor is logged in, use current_user.email
+        data:dict = request.get_json()
+        if (not data or 'email' not in data):
+            return jsonify({'error': 'Invalid input'}), 400
+        email = data.get('email')
+    
+    # Fetch patient names associated with the doctor's email
+    owner_names = fetch_patients(email)
+
+    return jsonify({"patients": owner_names}), 200 
 
 @main.route('/dashboard')
 @login_required
 def dashboard():
     patient_names = fetch_patients(current_user.email)
+    print(patient_names)
     return render_template(
         'dashboard.html',
         patients=patient_names
@@ -398,14 +450,15 @@ def disconnect():
         leave_room(email, sid=sid)
         del user_sessions[email]
 
-    if email in stop_signals:
-        stop_signals[email].set()
+    # Check if there is a stop_signal for this email
+    stop_signal = stop_signals.get(email)
+    if stop_signal:
+        stop_signal.set()  # Gracefully stop any background threads
 
     with thread_lock:
-        if email in user_threads:
-            del user_threads[email]
-        if email in stop_signals:
-            del stop_signals[email]
+        # Safely remove user threads and stop signals
+        user_threads.pop(email, None)  # Remove if exists, otherwise do nothing
+        stop_signals.pop(email, None)  # Remove if exists, otherwise do nothing
 
 @socketio.on('rejoin')
 def handle_rejoin(data:dict):

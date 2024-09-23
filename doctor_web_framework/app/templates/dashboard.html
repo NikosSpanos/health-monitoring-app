@@ -4,56 +4,142 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Dashboard</title>
-    <!-- <script src="https://code.jquery.com/jquery-3.6.0.min.js"></script>
-    <link href="https://cdnjs.cloudflare.com/ajax/libs/select2/4.0.13/css/select2.min.css" rel="stylesheet" />
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/select2/4.0.13/js/select2.min.js"></script> -->
 
     <script src="https://cdnjs.cloudflare.com/ajax/libs/socket.io/4.7.5/socket.io.js"></script>
     <script type="text/javascript" src="https://code.jquery.com/jquery-2.1.4.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/chartjs-adapter-date-fns/dist/chartjs-adapter-date-fns.bundle.min.js"></script>
+
+    <style>
+        .dropdown-container {
+            display: none;
+            border: 1px solid #ccc;
+            width: 200px;
+            background-color: #f9f9f9;
+            position: absolute;
+            z-index: 1;
+            max-height: 200px;
+            overflow-y: scroll; /* Enable scrolling for large lists */
+        }
+
+        .dropdown-item {
+            padding: 10px;
+            cursor: pointer;
+            display: block;
+        }
+
+        .dropdown-item:hover {
+            background-color: #f1f1f1;
+        }
+
+        .dropdown-button {
+            cursor: pointer;
+            background-color: #f0f0f0;
+            padding: 10px;
+            border: 1px solid #ccc;
+        }
+
+        .dropdown-button:hover {
+            background-color: #e0e0e0;
+        }
+
+        .multi-select {
+            display: block;
+            padding: 5px;
+        }
+
+        .multi-select input[type="checkbox"] {
+            margin-right: 5px;
+        }
+
+    </style>
 </head>
 <body>
     <h1>Dashboard for {{ current_user.name }}</h1>
     <a href="{{ url_for('main.logout') }}">Logout</a>
-
-    <!-- Dropdown for selecting patients -->
-    <div>
-        <label for="patient-select">Select Patients:</label>
-        <select id="patient-select" multiple>
-            {% for device_owner in patients %}
-                <option value="{{ device_owner }}">{{ device_owner }}</option>
-            {% endfor %}
-        </select>
-        <button id="load-patients">Load Dashboard</button>
+    <div style="margin-top: 20px;">
+        <span class="dropdown-button" onclick="toggleDropdown()">Select Patients</span>
+        <div class="dropdown-container" id="dropdown"></div>
+        <button id="load-patients" onclick="loadDashboard()">Load Dashboard</button>
     </div>
     <!-- Initially empty dashboard container -->
     <div id="dashboard-container"></div>
     <script type="text/javascript", charset="utf-8">
-        document.addEventListener('DOMContentLoaded', function() {
-            var doctorEmail = localStorage.getItem('doctor_email')
-            var socket = io('http://localhost:5000', {
-                query: {email: doctorEmail},
-                reconnection: true,
-                reconnectionAttempts: 5, // Try reconnecting 5 times
-                reconnectionDelay: 1000  // Wait 1 second between reconnection attempts
-            });
-            var charts = {};
+        let isDropdownLoaded = false; // Ensure the dropdown is loaded only once
+        const dropdown = document.getElementById("dropdown");
+        const doctorEmail = localStorage.getItem('doctor_email');
+        const socket = io('http://' + window.location.hostname +':3002', {
+            transports: ['websocket'],
+            query: {email: doctorEmail},
+            reconnection: true,
+            reconnectionAttempts: 2,
+            reconnectionDelay: 2000
+        });
+        // Function to load patient names dynamically from the backend
+        async function loadPatientNames() {
+            try {
+                const response = await fetch('/patients', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify({ email: doctorEmail })
+                });
 
-            // Event listener for the button to load the selected patients' dashboards
-            document.getElementById('load-patients').addEventListener('click', function() {
-                // var selectedPatients = Array.from(document.getElementById('patient-select').selectedOptions).map(option => option.value);
-                var selectedPatients = $('#patient-select').val();
-
-                if (selectedPatients.length === 0) {
-                    alert('Please select at least one patient.');
-                    return;
+                if (!response.ok) {
+                    throw new Error(await response.text());
                 }
 
-                // Emit an event to request KPI data for the selected patients
-                socket.emit('get_patient_data', { patients: selectedPatients, email: "{{ current_user.email }}" });
+                const data = await response.json();
+                const html = data.patients.map(patient => `
+                    <label class="multi-select">
+                        <input type="checkbox" value="${patient}"> ${patient}
+                    </label>
+                `).join('');
+                dropdown.innerHTML = html;
+
+            } catch (error) {
+                console.error('Error loading patient names:', error);
+            }
+        }
+        function toggleDropdown() {
+            // Only load the dropdown once when it's first clicked
+            var doctorEmail = localStorage.getItem('doctor_email');
+            console.log("toggleDropdown: " + doctorEmail);
+            if (!isDropdownLoaded) {
+                loadPatientNames();
+                isDropdownLoaded = true;
+            }
+
+            if (dropdown.style.display === "none" || dropdown.style.display === "") {
+                dropdown.style.display = "block";
+            } else {
+                dropdown.style.display = "none";
+            }
+        }
+        function loadDashboard() {
+            var doctorEmail = localStorage.getItem('doctor_email');
+            const selectedPatients = [];
+            const checkboxes = document.querySelectorAll('.multi-select input[type="checkbox"]:checked');
+
+            checkboxes.forEach(function (checkbox) {
+                selectedPatients.push(checkbox.value);  // Collect selected patient IDs
             });
-            // socket.emit('connect', { email: "{{ current_user.email }}", page: '/dashboard' });
+
+            if (selectedPatients.length === 0) {
+                alert('Please select at least one patient.');
+                return;
+            }
+            // Emit event to the server to get patient data
+            socket.emit('get_patient_data', { patients: selectedPatients, email: doctorEmail });
+        }
+        document.addEventListener('DOMContentLoaded', function() {
+            var doctorEmail = localStorage.getItem('doctor_email');
+            console.log("I am in document: " + doctorEmail);
+            var charts = {};
+            // Load patient names as soon as the page is ready
+            // Event listener for the button to load the selected patients' dashboards
+            // document.getElementById('load-patients').addEventListener('click', loadDashboard());
 
             // Listen for server response after emitting event
             socket.on('server_response', function(msg) {
@@ -144,6 +230,7 @@
             // Listen for 'update_patient_data' events from the server
             socket.on('update_patient_data', function(msg) {
                 console.log("Receiving new records for patient: ", msg.personal_traits.name);
+                console.log("Receiving temperature: ", msg.avg_temp);
                 if (!msg || !msg.device_owner || !msg.graph_data) {
                     console.error('Invalid message structure:', msg);
                     return;
@@ -154,8 +241,9 @@
                 // Dynamically create a div for the selected patient if it doesn't exist
                 var dashboardContainer = document.getElementById('dashboard-container');
                 var patientDivId = 'patient_' + msg.device_owner;
+                var patientDiv = document.getElementById(patientDivId);
 
-                if (!document.getElementById(patientDivId)) {
+                if (!patientDiv) {
                     // Create a div to hold patient data
                     var patientDiv = document.createElement('div');
                     patientDiv.id = patientDivId;
@@ -198,7 +286,6 @@
                             device_owner: msg.device_owner,
                             publish_flag: 0
                         });
-                        //alert('Message sent for ' + msg.personal_traits.name);
                     };
                     patientDiv.appendChild(submitButton);
 
@@ -247,6 +334,10 @@
                     // Append the patientDiv to the dashboard container
                     dashboardContainer.appendChild(patientDiv); 
                 }
+                // Update the temperature display for the patient
+                var avgTempDisplay = document.getElementById('avg_temp_' + msg.device_owner);
+                avgTempDisplay.textContent = 'Average Temperature (Last 2 Hours): ' + msg.avg_temp + '°C';
+                
                 // Generate or update the chart for the selected patient
                 createOrUpdateChart(msg.device_owner, msg.graph_data);
             });

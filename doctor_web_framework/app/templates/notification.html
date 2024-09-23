@@ -48,7 +48,8 @@
             var doctorEmail = localStorage.getItem('doctor_email')
             console.log("Logged user in session: ", doctorEmail)
             
-            var socket = io('http://localhost:5000', {
+            var socket = io('http://' + window.location.hostname +':3002', {
+                transports: ['websocket'],
                 query: {email: doctorEmail},
                 reconnection: true,
                 reconnectionAttempts: 5, // Try reconnecting 5 times
