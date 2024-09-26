@@ -6,7 +6,7 @@ from . import login_manager, socketio, thread_lock, redis_client, app, user_thre
 from flask_caching import Cache
 from typing import List, Dict
 from datetime import datetime, timedelta
-from sqlalchemy import func, or_
+from sqlalchemy import func, or_, distinct, and_
 from config import HealthConditions
 import pandas as pd
 import json
@@ -17,7 +17,6 @@ main = Blueprint('main', __name__, url_prefix='/')
 
 @login_manager.user_loader
 def load_user(user_id):
-    print("USER_ID", user_id)
     # return Doctor.query.filter_by(id = user_id).get(Doctor.email)
     return Doctor.query.get(user_id)
 
@@ -91,7 +90,7 @@ def clean_graph_data(graph_data):
     return graph_data
 
 # Master function to compute the relevant KPIs for each patient
-def compute_kpis(doctor_email:str, patients:list, redis_conn:Cache, kpi_freshness:int, compute_type:str) -> Dict[str, dict]:
+def compute_kpis(doctor_email:str, patients:list, patient_usernames:list, redis_conn:Cache, kpi_freshness:int) -> Dict[str, dict]:
 
     device_owners:dict = {}
     graphs:dict ={}
@@ -110,7 +109,12 @@ def compute_kpis(doctor_email:str, patients:list, redis_conn:Cache, kpi_freshnes
         .join(Owner, Device.device_owner == Owner.owner_username)
         .join(DoctorDeviceMapping, DoctorDeviceMapping.device_id == Device.device_id)
         .filter(DoctorDeviceMapping.doctor_id == doctor_email)
-        .filter(Owner.owner_name.in_(patients))
+        .filter(
+            and_(
+                Owner.owner_name.in_(patients),
+                Owner.owner_username.in_(patient_usernames)
+            ) #+add only the selected useername from User_id split
+        )
         .all()
     )
     for device in devices:
@@ -132,24 +136,24 @@ def compute_kpis(doctor_email:str, patients:list, redis_conn:Cache, kpi_freshnes
         df.set_index('Timestamp', inplace=True)
         df_resampled = df.resample('2min').mean()
 
-        if compute_type == "refresh":
-            graph_data = {
-                'x': df_resampled.index.strftime('%Y-%m-%dT%H:%M:%S').tolist(),
-                'y_heart_rate': df_resampled['Heart Rate'].tolist(),
-                'y_spo2': df_resampled['SpO2'].tolist(),
-                'device_owner': device.device_owner
-            }
-            # Clean the data before sending
-            graph_data = clean_graph_data(graph_data)
-            graphs[device.device_owner] = json.dumps(graph_data)
-        else:
-            graph_data = {
-                'x': [],
-                'y_heart_rate': [],
-                'y_spo2': [],
-                'device_owner': device.device_owner
-            }
-            graphs[device.device_owner] = json.dumps(graph_data)
+        # if compute_type == "refresh":
+        graph_data = {
+            'x': df_resampled.index.strftime('%Y-%m-%dT%H:%M:%S').tolist(),
+            'y_heart_rate': df_resampled['Heart Rate'].tolist(),
+            'y_spo2': df_resampled['SpO2'].tolist(),
+            'device_owner': device.device_owner
+        }
+        # Clean the data before sending
+        graph_data = clean_graph_data(graph_data)
+        graphs[device.device_owner] = json.dumps(graph_data)
+        # else:
+        #     graph_data = {
+        #         'x': [],
+        #         'y_heart_rate': [],
+        #         'y_spo2': [],
+        #         'device_owner': device.device_owner
+        #     }
+        #     graphs[device.device_owner] = json.dumps(graph_data)
         # Body temperature KPI
         # =====================
         # avg_temp = get_avg_temperature(device.device_id)
@@ -203,17 +207,83 @@ def compute_kpis(doctor_email:str, patients:list, redis_conn:Cache, kpi_freshnes
     }
     return json_blob
 
-def background_thread(doctor_email:str, patients:list):
-    global stop_signals
+# Valid option without bugs for backgorund_thread
+# def background_thread(doctor_email:str, patients:list):
+#     global stop_signals
+
+#     if not stop_signals[doctor_email]:
+#         logger.info(f"No stop signal for {doctor_email}, exiting thread.")
+#         return
+#     try:
+#         while not stop_signals[doctor_email].is_set():
+#             with app.app_context():
+#                 computed_records = compute_kpis(doctor_email, patients, redis_client, 2)
+#                 for id, name in computed_records['device_owners'].items():
+#                     logger.info(f"Emitting patient data for {name} with ID {id} to room {doctor_email}")
+#                     socketio.emit(
+#                         'update_patient_data',
+#                         {
+#                             'device_owner': id,
+#                             'avg_temp': computed_records['avg_temps'][id],
+#                             'graph_data': computed_records['graphs'][id],
+#                             'personal_traits': computed_records['personal_traits'][id],
+#                             'medical_history': computed_records['medical_histories'][id]
+#                         },
+#                         room=doctor_email
+#                     )
+#                 socketio.sleep(10)
+#     except Exception as e:
+#         logger.info(f"Error in background thread for {doctor_email}: {str(e)}")
+#     finally:
+#         logger.info(f"Background thread for {doctor_email} stopped.")
+
+
+def reverse_engineer_names(concatenated_value:str):
+    # Split the concatenated string by underscores
+    parts:list = concatenated_value.split('_')
+    
+    # Extract the original name (all parts except the last one, which is the username)
+    name_parts:List[str] = parts[:-1]
+
+    # Reconstruct the original name by capitalizing the first letter of each word
+    original_name = ' '.join([part.capitalize() for part in name_parts])
+    
+    return original_name
+
+def reverse_engineer_username(concatenated_value:str):
+    parts:list = concatenated_value.split('_')
+    username_part = parts[-1]
+
+    return username_part
+
+
+def background_thread(doctor_email: str):
+    global stop_signals, patients_session
 
     if not stop_signals[doctor_email]:
-        print(f"No stop signal for {doctor_email}, exiting thread.")
-        return  # Exit if no stop signal exists
+        logger.info(f"No stop signal for {doctor_email}, exiting thread.")
+        return
+
     try:
         while not stop_signals[doctor_email].is_set():
+            logger.info(f"Fetching data for {doctor_email}")
+
+            # Fetch the latest patient list dynamically from patients_session
+            patients = patients_session.get(doctor_email, [])
+            if not patients:
+                logger.info(f"No patients for {doctor_email}, waiting for updates")
+                socketio.sleep(5)
+                continue  # If no patients, wait for updates
+            
+            patients_names:list = [reverse_engineer_names(value) for value in patients]
+            patients_usernames:list = [reverse_engineer_username(value) for value in patients]
+            assert len(patients_names) == len(patients_usernames)
+            logger.info(f"Fetching names for patients: {patients_names}")
+            logger.info(f"Fetching usernames for patients: {patients_usernames}")
             with app.app_context():
-                computed_records = compute_kpis(doctor_email, patients, redis_client, 2, "refresh")
+                computed_records = compute_kpis(doctor_email, patients_names, patients_usernames, redis_client, 2)
                 for id, name in computed_records['device_owners'].items():
+                    logger.info(f"Emitting data for patient {name} (ID: {id})")
                     socketio.emit(
                         'update_patient_data',
                         {
@@ -225,11 +295,12 @@ def background_thread(doctor_email:str, patients:list):
                         },
                         room=doctor_email
                     )
-                socketio.sleep(5)
+            # Sleep for 5 seconds before fetching data again
+            socketio.sleep(5)
     except Exception as e:
-        print(f"Error in background thread for {doctor_email}: {str(e)}")
+        logger.error(f"Error in background thread for {doctor_email}: {str(e)}")
     finally:
-        print(f"Background thread for {doctor_email} stopped.")
+        logger.info(f"Background thread for {doctor_email} stopped.")
 
 def monitor_critical_condition(doctor_email:str):
     temp_normal, temp_hypothermi, temp_mild, temp_critical = HealthConditions.Temperature()
@@ -334,42 +405,89 @@ def monitor_critical_condition(doctor_email:str):
 
 def get_notifications_info(email:str) -> str:
     doctor_info:Doctor = db.session.query(Doctor).filter(Doctor.email == email).first()
-    print(doctor_info)
     target_name:str = doctor_info.name
     return target_name
 
-def fetch_patients(email:str) -> List[str]:
-    owner_names = (
-        db.session.query(Owner.owner_name)
-        .join(Device, Owner.owner_username == Device.device_owner)
-        .join(DoctorDeviceMapping, DoctorDeviceMapping.device_id == Device.device_id)
-        .filter(DoctorDeviceMapping.doctor_id == email)
-        .all()
-    )
-    owner_names:List[str] = [name for (name,) in owner_names]
-    print("Fetched Owner Names:", owner_names)
-    return owner_names
+def normalize_name(name:str):
+    return name.lower().replace(" ", "_")
+
+def fetch_patients(doctor_email:str):
+    try:
+        owner_names_usernames = (
+            db.session.query(distinct(Owner.owner_name), Owner.owner_username)
+            .join(Device, Owner.owner_username == Device.device_owner)
+            .join(DoctorDeviceMapping, Device.device_id == DoctorDeviceMapping.device_id)
+            .filter(DoctorDeviceMapping.doctor_id == doctor_email)
+            .all()
+        )
+        
+        # Extract names from the result tuples
+        # return ([name[0] for name in owner_names], )
+        owner_names = [result[0] for result in owner_names_usernames]
+        owner_usernames:List[str] = [result[1] for result in owner_names_usernames]
+
+        # Merge the lists with normalized names and usernames
+        merged_list = [f"{normalize_name(name)}_{username.lower()}" for name, username in zip(owner_names, owner_usernames)]
+
+        return merged_list
+    
+    except Exception as e:
+        # Log the error
+        logger.error(f"Error fetching patients for doctor {doctor_email}: {str(e)}")
+        # Re-raise the exception to be handled by the calling function
+        raise
+
+# @main.route('/patients', methods=['POST'])
+# @login_required
+# def get_patients():
+#     if request.method == 'POST':
+#         # Assuming the doctor is logged in, use current_user.email
+#         data:dict = request.get_json()
+#         if (not data or 'email' not in data):
+#             return jsonify({'error': 'Invalid input'}), 400
+#         email = data.get('email')
+#         print(email)
+    
+#     # Fetch patient names associated with the doctor's email
+#     owner_names = fetch_patients(email)
+#     print(owner_names)
+
+#     return jsonify({"patients": owner_names}), 200
 
 @main.route('/patients', methods=['POST'])
 @login_required
 def get_patients():
-    if request.method == 'POST':
-        # Assuming the doctor is logged in, use current_user.email
-        data:dict = request.get_json()
-        if (not data or 'email' not in data):
+    try:
+        data = request.get_json()
+        logger.info("My email is: " + str(data))
+        
+        if not data or 'email' not in data:
             return jsonify({'error': 'Invalid input'}), 400
-        email = data.get('email')
+        
+        email = data['email']
+        
+        # Verify that the email matches the logged-in user's email
+        if email != current_user.email:
+            return jsonify({'error': 'Unauthorized access'}), 403
+        
+        # Fetch patient names associated with the doctor's email
+        owner_names = fetch_patients(email)
+        logger.info(owner_names)
+        
+        if not owner_names:
+            return jsonify({'patients': []}), 200
+        
+        return jsonify({'patients': owner_names}), 200
     
-    # Fetch patient names associated with the doctor's email
-    owner_names = fetch_patients(email)
-
-    return jsonify({"patients": owner_names}), 200 
+    except Exception as e:
+        logger.info(f"Error in get_patients: {str(e)}")
+        return jsonify({'error': 'Internal server error'}), 500
 
 @main.route('/dashboard')
 @login_required
 def dashboard():
     patient_names = fetch_patients(current_user.email)
-    print(patient_names)
+    logger.info(patient_names)
     return render_template(
         'dashboard.html',
         patients=patient_names
@@ -382,38 +500,213 @@ def notification():
     doctor_name = get_notifications_info(email)
     return render_template('notification.html', message="No critical conditions found", doctor_name = doctor_name)
 
+# @socketio.on('get_patient_data')
+# def handle_patients(data:Dict[str, str]):
+#     global user_threads, stop_signals, patients_session
+#     with thread_lock:
+#         if current_user.is_authenticated:
+#             sid = request.sid
+#             email = data.get('email')
+#             patients = data.get('patients')
+
+#             user_sessions[email] = sid
+#             join_room(email, sid=sid)
+
+#             if email not in stop_signals:
+#                 stop_signals[email] = threading.Event()
+#             else:
+#                 stop_signals[email].clear()
+
+#             if email and patients:
+#                 if email in user_threads:
+#                     # print(f"user_threads[{email}] is of type {type(user_threads[email])}")
+#                     logger.info(f"user_threads[{email}] is of type {type(user_threads[email])}")
+#                     if patients != patients_session[sid]:
+#                         del user_threads[email]
+#                         del patients_session[sid]
+#                         user_threads[email] = socketio.start_background_task(background_thread, email, patients)
+#                 else:
+#                     if (email not in user_threads):
+#                         patients_session[sid] = patients
+#                         user_threads[email] = socketio.start_background_task(background_thread, email, patients)
+#                     else:
+#                         print("No patients selected or missing email.")
+#         else:
+#             print("User is not authenticated. Background thread will not start yet.")
+
+# @socketio.on('get_patient_data')
+# @login_required
+# def handle_patients(data:dict):
+#     global user_threads, stop_signals, patients_session
+#     with thread_lock:
+#         if current_user.is_authenticated:
+#             sid = request.sid
+#             email:str = data.get('email')
+#             patients:list = data.get('patients')
+
+#             user_sessions[email] = sid
+#             join_room(email, sid=sid)
+
+#             if email not in stop_signals:
+#                 stop_signals[email] = threading.Event()
+#             else:
+#                 stop_signals[email].clear()
+
+#             if email and patients:
+#                 # Only restart the background thread if the patient selection has changed
+#                 if email in user_threads:
+#                     logger.info(patients)
+#                     logger.info(patients_session.get(sid))
+#                     if patients != patients_session.get(sid,[]):
+#                         # The patients list has changed, restart the background thread
+#                         logger.info(f"Restarting thread for {email} due to patient change")
+#                         stop_signals[email].set()  # Stop the old thread
+#                         del user_threads[email]
+#                         del patients_session[sid]
+#                         patients_session[sid] = patients
+#                         user_threads[email] = socketio.start_background_task(background_thread, email, patients)
+#                     else:
+#                         logger.info(f"Thread for {email} is already running with the same patients.")
+#                         with app.app_context():
+#                             computed_records = compute_kpis(email, patients, redis_client, 2)
+#                             for id, name in computed_records['device_owners'].items():
+#                                 socketio.emit(
+#                                     'update_patient_data',
+#                                     {
+#                                         'device_owner': id,
+#                                         'avg_temp': computed_records['avg_temps'][id],
+#                                         'graph_data': computed_records['graphs'][id],
+#                                         'personal_traits': computed_records['personal_traits'][id],
+#                                         'medical_history': computed_records['medical_histories'][id]
+#                                     },
+#                                     room=email
+#                                 )
+#                 else:
+#                     # Start a new background thread for this doctor and patients
+#                     logger.info(f"Starting new thread for {email}")
+#                     patients_session[sid] = patients
+#                     user_threads[email] = socketio.start_background_task(background_thread, email, patients)
+#             else:
+#                 logger.info("No patients selected or missing email.")
+#         else:
+#             logger.info("User is not authenticated. Background thread will not start yet.")
+
+### Below is a valid option with bug
+#--------------------------------------------------
+# @socketio.on('get_patient_data')
+# @login_required
+# def handle_patients(data: dict):
+#     global user_threads, stop_signals, patients_session
+#     with thread_lock:
+#         sid = request.sid
+#         email: str = data.get('email')
+#         new_patients: list = data.get('patients')
+
+#         user_sessions[email] = sid
+#         join_room(email, sid=sid)
+
+#         if email not in stop_signals:
+#             stop_signals[email] = threading.Event()
+#         else:
+#             stop_signals[email].clear()
+
+#         if email and new_patients:
+#             # If the thread already exists for this doctor, check if patients have changed
+#             if email in user_threads:
+#                 existing_patients = patients_session.get(sid, [])
+#                 logger.info(f"Existing patients: {existing_patients}")
+#                 logger.info(f"New patients: {new_patients}")
+                
+#                 # Determine which patients are new and which were removed
+#                 added_patients = list(set(new_patients) - set(existing_patients))
+#                 removed_patients = list(set(existing_patients) - set(new_patients))
+
+#                 if added_patients or removed_patients:
+#                     logger.info(f"Patients added: {added_patients}, Patients removed: {removed_patients}")
+                    
+#                     # Stop the thread if patients were removed
+#                     if removed_patients:
+#                         logger.info(f"Stopping thread for {email} due to removed patients")
+#                         stop_signals[email].set()  # Stop the current thread
+#                         del user_threads[email]     # Remove the old thread reference
+
+#                     # Start a new thread with the updated patient list
+#                     logger.info(f"Restarting thread for {email} with new patient list")
+#                     patients_session[sid] = new_patients
+#                     user_threads[email] = socketio.start_background_task(background_thread, email, new_patients)
+
+#                 else:
+#                     # No changes in patient list, keep the existing thread running
+#                     logger.info(f"No changes in patient list for {email}. Continuing existing thread.")
+#                     # Optionally, trigger an immediate update without restarting the thread
+#                     with app.app_context():
+#                         computed_records = compute_kpis(email, new_patients, redis_client, 2)
+#                         for id, name in computed_records['device_owners'].items():
+#                             socketio.emit(
+#                                 'update_patient_data',
+#                                 {
+#                                     'device_owner': id,
+#                                     'avg_temp': computed_records['avg_temps'][id],
+#                                     'graph_data': computed_records['graphs'][id],
+#                                     'personal_traits': computed_records['personal_traits'][id],
+#                                     'medical_history': computed_records['medical_histories'][id]
+#                                 },
+#                                 room=email
+#                             )
+
+#             else:
+#                 # No existing thread, start a new one
+#                 logger.info(f"Starting new thread for {email} with patients {new_patients}")
+#                 patients_session[sid] = new_patients
+#                 user_threads[email] = socketio.start_background_task(background_thread, email, new_patients)
+
+#         else:
+#             logger.info("No patients selected or missing email.")
+
 @socketio.on('get_patient_data')
-def handle_patients(data:Dict[str, str]):
+@login_required
+def handle_patients(data: dict):
     global user_threads, stop_signals, patients_session
     with thread_lock:
-        if current_user.is_authenticated:
-            sid = request.sid
-            email = data.get('email')
-            patients = data.get('patients')
+        sid = request.sid
+        email: str = data.get('email')
+        new_patients: list = data.get('patients')
 
-            user_sessions[email] = sid
-            join_room(email, sid=sid)
+        user_sessions[email] = sid
+        # join_room(email, sid=sid)
 
-            if email not in stop_signals:
-                stop_signals[email] = threading.Event()
-            else:
-                stop_signals[email].clear()
+        if email not in stop_signals:
+            stop_signals[email] = threading.Event()
 
-            if email and patients:
-                if email in user_threads:
-                    print(f"user_threads[{email}] is of type {type(user_threads[email])}")
-                    if patients != patients_session[sid]:
-                        del user_threads[email]
-                        del patients_session[sid]
-                        user_threads[email] = socketio.start_background_task(background_thread, email, patients)
-                else:
-                    if (email not in user_threads):
-                        patients_session[sid] = patients
-                        user_threads[email] = socketio.start_background_task(background_thread, email, patients)
-                    else:
-                        print("No patients selected or missing email.")
+        if email not in patients_session: #The first time starting the app. The first time user logs.
+            logger.info(f"1-Starting new thread for {email} with patients {new_patients}")
+            patients_session[email] = new_patients
+            user_threads[email] = socketio.start_background_task(background_thread, email)
+        
         else:
-            print("User is not authenticated. Background thread will not start yet.")
+            if email and new_patients:
+                # If the thread already exists, update the patient list dynamically
+                if email in user_threads:
+                    existing_patients = patients_session.get(email, [])
+                    logger.info(f"Existing patients: {existing_patients}")
+                    logger.info(f"New patients: {new_patients}")
+
+                    # Update the patient list for the existing thread
+                    patients_session[email] = new_patients
+                    logger.info(f"Updated patient list for {email} in the existing thread")
+
+                    # Optionally emit a message to the client about removed patients
+                    removed_patients = list(set(existing_patients) - set(new_patients))
+                    if removed_patients:
+                        logger.info(removed_patients)
+                        socketio.emit('remove_patients', {'removed_patients': removed_patients}, room=email)
+                else:
+                    # If no existing thread, start a new one
+                    logger.info(f"2-Starting new thread for {email} with patients {new_patients}")
+                    patients_session[email] = new_patients
+                    user_threads[email] = socketio.start_background_task(background_thread, email)
+            else:
+                logger.info("No patients selected or missing email.")
 
 @socketio.on('user_info')
 def handle_connect(data:Dict[str, str]):
@@ -436,9 +729,9 @@ def handle_connect(data:Dict[str, str]):
                 if (email not in user_threads) or (not user_threads[email].is_alive()):
                     user_threads[email] = socketio.start_background_task(monitor_critical_condition, email)
             else:
-                print("Received message from invalid client. Please check the rendering page.")
+                logger.info("Received message from invalid client. Please check the rendering page.")
         else:
-            print("User is not authenticated. Background thread will not start yet.")
+            logger.info("User is not authenticated. Background thread will not start yet.")
 
 @socketio.event
 def disconnect():
@@ -493,7 +786,7 @@ def handle_connect():
         # Emit a response to the client to confirm connection
         socketio.emit('server_response', {'data': 'Connected to server'}, room=email)
     else:
-        print('Email not found in connection request.')
+        logger.info('Email not found in connection request.')
     
 @socketio.on("send_patient_message")
 def handle_patient_message(data:dict):

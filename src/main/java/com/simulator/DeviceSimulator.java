@@ -25,7 +25,8 @@ public class DeviceSimulator {
     
     //Initialize global variables
     public static final String KAFKA_TOPIC = "health-data-records";
-    public static final String BOOTSTRAP_SERVERS = "localhost:29092,localhost:29093,localhost:29094";
+    // public static final String BOOTSTRAP_SERVERS = "localhost:29092,localhost:29093,localhost:29094";
+    public static final String BOOTSTRAP_SERVERS = "localhost:9096";
 
     private static String getCurrentTimestamp() {
         ZonedDateTime currentTimestamp = ZonedDateTime.now();

@@ -27,7 +27,7 @@ RUN pip install --no-cache-dir -r ./requirements.txt
 EXPOSE 5000
 
 # Adjust number of gunicorn workers for scalable deployment
-ENV GUNICORN_WORKERS=3
+ENV GUNICORN_WORKERS=2
 
 # CMD ["gunicorn", "-k", "gevent", "-w", "1", "-b", "0.0.0.0:5000", "--log-level", "info", "app:app"]
 ENTRYPOINT ["/bin/bash", "-c", "/doctor-web-framework/clear_logs.sh && gunicorn -k gevent -w $GUNICORN_WORKERS -b 0.0.0.0:5000 --log-level info app:app"]

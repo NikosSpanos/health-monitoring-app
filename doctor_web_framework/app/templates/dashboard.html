@@ -56,7 +56,7 @@
 </head>
 <body>
     <h1>Dashboard for {{ current_user.name }}</h1>
-    <a href="{{ url_for('main.logout') }}">Logout</a>
+    <a href="{{ url_for('main.logout') }}" class="logout-link">Logout</a>
     <div style="margin-top: 20px;">
         <span class="dropdown-button" onclick="toggleDropdown()">Select Patients</span>
         <div class="dropdown-container" id="dropdown"></div>
@@ -76,36 +76,37 @@
             reconnectionDelay: 2000
         });
         // Function to load patient names dynamically from the backend
-        async function loadPatientNames() {
-            try {
-                const response = await fetch('/patients', {
-                    method: 'POST',
-                    headers: {
-                        'Content-Type': 'application/json'
-                    },
-                    body: JSON.stringify({ email: doctorEmail })
-                });
-
+        function loadPatientNames() {
+            console.log("Doctor's email: " + doctorEmail)
+            const response = fetch('/patients', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'Accept': 'application/json'
+                },
+                body: JSON.stringify({ email: doctorEmail })
+            })
+            .then(response => {
                 if (!response.ok) {
-                    throw new Error(await response.text());
+                    // If the response is not OK (e.g., 401 or 404), throw an error
+                    return response.text().then(text => { throw new Error(text) });
                 }
-
-                const data = await response.json();
-                const html = data.patients.map(patient => `
+                return response.json();
+            })
+            .then(data  => {
+                if (data && data.patients) {
+                    dropdown.innerHTML = data.patients.map(patient => `
                     <label class="multi-select">
                         <input type="checkbox" value="${patient}"> ${patient}
                     </label>
                 `).join('');
-                dropdown.innerHTML = html;
-
-            } catch (error) {
+                }
+            }).catch(error => {
                 console.error('Error loading patient names:', error);
-            }
-        }
+                dropdown.innerHTML = '<p>Error loading patient names. Please try again.</p>';
+            });
+        };
         function toggleDropdown() {
-            // Only load the dropdown once when it's first clicked
-            var doctorEmail = localStorage.getItem('doctor_email');
-            console.log("toggleDropdown: " + doctorEmail);
             if (!isDropdownLoaded) {
                 loadPatientNames();
                 isDropdownLoaded = true;
@@ -116,31 +117,29 @@
             } else {
                 dropdown.style.display = "none";
             }
-        }
-        function loadDashboard() {
-            var doctorEmail = localStorage.getItem('doctor_email');
-            const selectedPatients = [];
-            const checkboxes = document.querySelectorAll('.multi-select input[type="checkbox"]:checked');
+        };
 
-            checkboxes.forEach(function (checkbox) {
-                selectedPatients.push(checkbox.value);  // Collect selected patient IDs
-            });
+        function loadDashboard() {
+            const selectedPatients = Array.from(
+                document.querySelectorAll('.multi-select input[type="checkbox"]:checked')
+            ).map(checkbox => checkbox.value);
 
             if (selectedPatients.length === 0) {
                 alert('Please select at least one patient.');
                 return;
             }
-            // Emit event to the server to get patient data
-            socket.emit('get_patient_data', { patients: selectedPatients, email: doctorEmail });
-        }
-        document.addEventListener('DOMContentLoaded', function() {
-            var doctorEmail = localStorage.getItem('doctor_email');
-            console.log("I am in document: " + doctorEmail);
-            var charts = {};
-            // Load patient names as soon as the page is ready
-            // Event listener for the button to load the selected patients' dashboards
-            // document.getElementById('load-patients').addEventListener('click', loadDashboard());
 
+            if (socket.connected) {
+                console.log("Loading Dashboards for patients: " + selectedPatients);
+                socket.emit('get_patient_data', { patients: selectedPatients, email: doctorEmail });
+            } else {
+                console.error('Socket connection is not established');
+            }
+        };
+
+        document.addEventListener('DOMContentLoaded', function() {
+            var charts = {};
+            
             // Listen for server response after emitting event
             socket.on('server_response', function(msg) {
                 console.log('Server says: ' + msg.data);
@@ -207,7 +206,7 @@
                     // console.log('New chart created:', charts[deviceOwner]);
                     updateChartData(charts[deviceOwner], data);
                 }
-            }
+            };
             // Function to update chart data
             function updateChartData(chart, data) {
                 if (!data || !Array.isArray(data.x) || !Array.isArray(data.y_heart_rate) || !Array.isArray(data.y_spo2)) {
@@ -225,22 +224,86 @@
                 chart.data.datasets[0].data = newHeartRateData;
                 chart.data.datasets[1].data = newSpO2Data;
                 chart.update();
-            }
+            };
+
+            function updatePersonalTraits(deviceOwner, personalTraits) {
+                var personalTraitsTable = document.getElementById('personal_traits_' + deviceOwner);
+                if (personalTraitsTable) {
+                    personalTraitsTable.innerHTML = `
+                        <tr><td>Name:</td><td>${personalTraits.name || 'N/A'}</td></tr>
+                        <tr><td>Age:</td><td>${personalTraits.age || 'N/A'}</td></tr>
+                        <tr><td>Gender:</td><td>${personalTraits.gender || 'N/A'}</td></tr>
+                    `;
+                } else {
+                    console.error('Personal traits table not found for device owner:', deviceOwner);
+                }
+            };
+            function updateMedicalHistory(deviceOwner, medicalHistory) {
+                var medicalHistoryTable = document.getElementById('medical_history_' + deviceOwner);
+                if (medicalHistoryTable) {
+                    medicalHistoryTable.innerHTML = `
+                        <tr><td>Chronic Conditions:</td><td>${medicalHistory.chronic_conditions || 'N/A'}</td></tr>
+                        <tr><td>Family History:</td><td>${medicalHistory.family_history || 'N/A'}</td></tr>
+                        <tr><td>Smoking:</td><td>${medicalHistory.smoking || 'N/A'}</td></tr>
+                        <tr><td>Alcohol Usage:</td><td>${medicalHistory.alcohol_usage || 'N/A'}</td></tr>
+                        <tr><td>Allergies:</td><td>${medicalHistory.allergies || 'N/A'}</td></tr>
+                        <tr><td>Medication:</td><td>${medicalHistory.medication || 'N/A'}</td></tr>
+                    `;
+                } else {
+                    console.error('Medical history table not found for device owner:', deviceOwner);
+                }
+            };
+
+            function normalizeName(name) {
+                return name.toLowerCase().replace(/\s+/g, '_');
+            };
+
+            // Remove the dashboards of patients who were unselected (handled by the server-side emit or another trigger)
+            function removeOldPatientDashboards(removedPatients) {
+                removedPatients.forEach(patientName => {
+                    const patientDivId = 'patient_' + patientName;
+                    const patientDiv = document.getElementById(patientDivId);
+                    if (patientDiv) {
+                        patientDiv.remove();  // Remove the patient dashboard from the DOM
+                        console.log(`Removed dashboard for unselected patient: ${patientName}`);
+                    } else {
+                        console.log(`Patient dashboard not found for: ${patientName}`);
+                    }
+                });
+            };
+
+            socket.on('remove_patients', function(msg) {
+                if (msg.removed_patients) {
+                    console.log("Removing patients: ", msg.removed_patients);
+                    removeOldPatientDashboards(msg.removed_patients);
+                }
+            });
 
             // Listen for 'update_patient_data' events from the server
             socket.on('update_patient_data', function(msg) {
-                console.log("Receiving new records for patient: ", msg.personal_traits.name);
-                console.log("Receiving temperature: ", msg.avg_temp);
+                // console.log("Receiving new records for patient: ", msg.personal_traits.name);
+                // console.log("Receiving new records for patient(normalized): ", normalizeName(msg.personal_traits.name));
+                console.log("Receiving new records for patient(normalized): ", normalizeName(msg.personal_traits.name) + "_" + msg.device_owner.toLowerCase());
                 if (!msg || !msg.device_owner || !msg.graph_data) {
                     console.error('Invalid message structure:', msg);
                     return;
                 }
+
+                var components_id = normalizeName(msg.personal_traits.name) + "_" + msg.device_owner.toLowerCase();
+
+                // if (msg.removed_patients && msg.removed_patients.length > 0) {
+                //     console.log("Removing patients: ", msg.removed_patients);
+                //     removeOldPatientDashboards(msg.removed_patients);
+                // }
+
+                //Handle patient dashboards
                 if (typeof msg.graph_data === 'string') {
                     msg.graph_data = JSON.parse(msg.graph_data);
                 }
                 // Dynamically create a div for the selected patient if it doesn't exist
                 var dashboardContainer = document.getElementById('dashboard-container');
-                var patientDivId = 'patient_' + msg.device_owner;
+                // var patientDivId = 'patient_' + msg.device_owner;
+                var patientDivId = 'patient_' + components_id;
                 var patientDiv = document.getElementById(patientDivId);
 
                 if (!patientDiv) {
@@ -255,16 +318,18 @@
 
                     // Add the text box and submit button
                     var messageBox = document.createElement('textarea');
-                    messageBox.id = 'message_' + msg.device_owner;
+                    // messageBox.id = 'message_' + msg.device_owner;
+                    messageBox.id = 'message_' + components_id;
                     messageBox.placeholder = 'Write a message...';
                     patientDiv.appendChild(messageBox);
 
                     var submitButton = document.createElement('button');
                     submitButton.textContent = 'Submit Message';
                     submitButton.onclick = function() {
-                        var messageElement = document.getElementById('message_' + msg.device_owner);
+                        // var messageElement = document.getElementById('message_' + msg.device_owner);
+                        var messageElement = document.getElementById('message_' + components_id);
                         if (!messageElement) {
-                            console.error('Message box for device_owner ' + msg.device_owner + ' not found.');
+                            console.error('Message box for device_owner ' + components_id + ' not found.');
                             return;
                         }
                         var message = messageElement.value;
@@ -291,13 +356,15 @@
 
                     // Add the average temperature display
                     var avgTempDisplay = document.createElement('h4');
-                    avgTempDisplay.id = 'avg_temp_' + msg.device_owner;
+                    // avgTempDisplay.id = 'avg_temp_' + msg.device_owner;
+                    avgTempDisplay.id = 'avg_temp_' + components_id;
                     avgTempDisplay.textContent = 'Average Temperature (Last 2 Hours): ' + msg.avg_temp + '°C';
                     patientDiv.appendChild(avgTempDisplay);
 
                     // Create a canvas for the chart
                     var canvas = document.createElement('canvas');
-                    canvas.id = 'graph_' + msg.device_owner;
+                    // canvas.id = 'graph_' + msg.device_owner;
+                    canvas.id = 'graph_' + components_id;
                     canvas.width = 300;
                     canvas.height = 100;
                     patientDiv.appendChild(canvas);
@@ -307,7 +374,8 @@
                     personalTraitsHeader.textContent = 'Personal Traits';
                     patientDiv.appendChild(personalTraitsHeader);
                     var personalTraitsTable = document.createElement('table');
-                    personalTraitsTable.id = 'personal_traits_' + msg.device_owner;
+                    // personalTraitsTable.id = 'personal_traits_' + msg.device_owner;
+                    personalTraitsTable.id = 'personal_traits_' + components_id;
                     personalTraitsTable.innerHTML = `
                         <tr><td>Name:</td><td>${msg.personal_traits.name || 'N/A'}</td></tr>
                         <tr><td>Age:</td><td>${msg.personal_traits.age || 'N/A'}</td></tr>
@@ -320,7 +388,8 @@
                     medicalHistoryHeader.textContent = 'Medical History';
                     patientDiv.appendChild(medicalHistoryHeader);
                     var medicalHistoryTable = document.createElement('table');
-                    medicalHistoryTable.id = 'medical_history_' + msg.device_owner;
+                    // medicalHistoryTable.id = 'medical_history_' + msg.device_owner;
+                    medicalHistoryTable.id = 'medical_history_' + components_id;
                     medicalHistoryTable.innerHTML = `
                         <tr><td>Chronic Conditions:</td><td>${msg.medical_history.chronic_conditions || 'N/A'}</td></tr>
                         <tr><td>Family History:</td><td>${msg.medical_history.family_history || 'N/A'}</td></tr>
@@ -332,14 +401,22 @@
                     patientDiv.appendChild(medicalHistoryTable);
 
                     // Append the patientDiv to the dashboard container
-                    dashboardContainer.appendChild(patientDiv); 
+                    dashboardContainer.appendChild(patientDiv);
                 }
                 // Update the temperature display for the patient
-                var avgTempDisplay = document.getElementById('avg_temp_' + msg.device_owner);
+                // var avgTempDisplay = document.getElementById('avg_temp_' + msg.device_owner);
+                var avgTempDisplay = document.getElementById('avg_temp_' + components_id);
                 avgTempDisplay.textContent = 'Average Temperature (Last 2 Hours): ' + msg.avg_temp + '°C';
                 
                 // Generate or update the chart for the selected patient
-                createOrUpdateChart(msg.device_owner, msg.graph_data);
+                createOrUpdateChart(components_id, msg.graph_data);
+
+                // Update the Personal traits display for the patient
+                updatePersonalTraits(components_id, msg.personal_traits)
+                
+                // Update medical history
+                updateMedicalHistory(components_id, msg.medical_history);
+
             });
 
             socket.on('message_saved', function(data) {
@@ -366,6 +443,24 @@
             window.addEventListener('beforeunload', function() {
                 socket.disconnect();
             });
+
+            // Logout logic
+            // document.getElementById('logout').addEventListener('click', function() {
+            //     socket.emit('disconnect');
+            //     localStorage.removeItem('doctor_email');  // Clear email from local storage
+            //     window.location.href = '/logout';  // Redirect to Flask logout route
+            // });
+            const logoutLink = document.querySelector('a[href="{{ url_for("main.logout") }}"]');
+            if (logoutLink) {
+                logoutLink.addEventListener('click', function(event) {
+                    event.preventDefault(); // Prevent the default logout action for demonstration
+                    console.log("Logout clicked!");
+                    // Add custom logic (confirmation dialog, etc.)
+                    window.location.href = logoutLink.href; // Redirect to the logout URL manually
+                });
+            } else {
+                console.error('Logout link not found');
+            }
         });
     </script>
 </body>
